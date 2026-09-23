@@ -56,3 +56,32 @@ export interface Resource {
   createdAt: Date;
   updatedAt: Date;
 }
+
+export const BOOKING_STATUSES = [
+  "pending",
+  "approved",
+  "rejected",
+  "cancelled",
+  "checked_in",
+  "completed",
+  "no_show",
+] as const;
+export type BookingStatus = (typeof BOOKING_STATUSES)[number];
+
+/** Statuses that hold a slot (they participate in the overlap constraint). */
+export const SLOT_HOLDING_STATUSES = ["pending", "approved", "checked_in"] as const satisfies readonly BookingStatus[];
+
+/** `period` is the half-open range [startsAt, endsAt), stored as tstzrange in UTC. */
+export interface Booking {
+  id: string;
+  resourceId: string;
+  userId: string;
+  startsAt: Date;
+  endsAt: Date;
+  status: BookingStatus;
+  purpose: string;
+  attendeeCount: number;
+  seriesId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}

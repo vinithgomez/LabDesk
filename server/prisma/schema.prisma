@@ -22,6 +22,18 @@ enum UserRole {
   @@map("user_role")
 }
 
+enum BookingStatus {
+  pending
+  approved
+  rejected
+  cancelled
+  checked_in
+  completed
+  no_show
+
+  @@map("booking_status")
+}
+
 enum ResourceType {
   lab
   room
@@ -54,6 +66,7 @@ model User {
   ownedResources ResourceOwner[]
   refreshTokens  RefreshToken[]
   auditEntries   AuditLog[]
+  bookings       Booking[]
 
   @@index([departmentId])
   @@map("users")
@@ -78,6 +91,7 @@ model Resource {
   updatedAt          DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   department         Department      @relation(fields: [departmentId], references: [id], onDelete: Restrict)
   owners             ResourceOwner[]
+  bookings           Booking[]
 
   @@index([departmentId])
   @@map("resources")
@@ -131,4 +145,28 @@ model AuditLog {
   @@index([entityType, entityId, createdAt])
   @@index([actorId])
   @@map("audit_log")
+}
+
+// period is a half-open tstzrange [start, end). Prisma has no range type, so
+// the column is Unsupported and every booking query is raw SQL in
+// BookingRepository. Range CHECKs live in the migration.
+model Booking {
+  id             String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  resourceId     String                   @map("resource_id") @db.Uuid
+  userId         String                   @map("user_id") @db.Uuid
+  period         Unsupported("tstzrange")
+  status         BookingStatus            @default(pending)
+  purpose        String                   @default("")
+  attendeeCount  Int                      @default(1) @map("attendee_count")
+  // FK to booking_series is added with that table in Phase 5.
+  seriesId       String?                  @map("series_id") @db.Uuid
+  idempotencyKey String?                  @map("idempotency_key")
+  createdAt      DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime                 @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  resource       Resource                 @relation(fields: [resourceId], references: [id], onDelete: Restrict)
+  user           User                     @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([resourceId])
+  @@index([userId])
+  @@map("bookings")
 }

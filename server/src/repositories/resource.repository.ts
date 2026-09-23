@@ -99,6 +99,16 @@ export class ResourceRepository {
     await this.db.$executeRaw`SELECT 1 FROM "resources" WHERE "id" = ${id}::uuid FOR UPDATE`;
   }
 
+  /**
+   * Takes a SHARE row lock for the rest of the transaction. Concurrent
+   * bookings share it freely; anything that changes whether a resource is
+   * bookable (deactivation, maintenance windows) takes FOR UPDATE and so
+   * serializes against in-flight bookings.
+   */
+  async lockForShare(id: string): Promise<void> {
+    await this.db.$executeRaw`SELECT 1 FROM "resources" WHERE "id" = ${id}::uuid FOR SHARE`;
+  }
+
   async update(id: string, patch: Partial<ResourceFields>): Promise<Resource> {
     const row = await this.db.resource.update({ where: { id }, data: patch, select: resourceSelect });
     return toResource(row);

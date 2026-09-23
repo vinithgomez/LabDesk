@@ -8,6 +8,7 @@ import { errorHandler, notFoundHandler } from "./http/errors.js";
 import type { Logger } from "./lib/logger.js";
 import { authRouter } from "./routes/auth.routes.js";
 import { departmentsRouter } from "./routes/departments.routes.js";
+import { bookingsRouter } from "./routes/bookings.routes.js";
 import { resourcesRouter } from "./routes/resources.routes.js";
 import { usersRouter } from "./routes/users.routes.js";
 
@@ -39,6 +40,7 @@ export function createApp({ config, services, logger }: AppDeps): Express {
   app.use("/api/departments", departmentsRouter(services.departments));
   app.use("/api/users", usersRouter(services.auth, services.users));
   app.use("/api/resources", resourcesRouter(services.auth, services.resources));
+  app.use("/api/bookings", bookingsRouter(services.auth, services.bookings, services.resources));
 
   app.use(notFoundHandler);
   app.use(errorHandler(logger));
