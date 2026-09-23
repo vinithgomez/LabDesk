@@ -1,18 +1,23 @@
+# Postgres credentials come from server/.env (see server/.env.example):
+#   docker compose --env-file server/.env up -d
+# The :? form makes compose fail loudly if a variable is missing, rather than
+# silently initialising the database with an empty user or password.
 services:
   postgres:
     image: postgres:16-alpine
     container_name: labdesk-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: labdesk
-      POSTGRES_PASSWORD: labdesk
-      POSTGRES_DB: labdesk
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in server/.env and pass --env-file server/.env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in server/.env and pass --env-file server/.env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in server/.env and pass --env-file server/.env}
     ports:
       - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U labdesk -d labdesk"]
+      # $$ defers expansion to the container's shell, which has the values above.
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
       retries: 10

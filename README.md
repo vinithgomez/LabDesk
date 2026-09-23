@@ -6,9 +6,9 @@ See `CLAUDE.md` for the full specification.
 
 ## Local setup
 
-1. `docker compose up -d` (Postgres on 5433, Redis on 6380)
-2. `cd server && cp .env.example .env`
-3. `npm install`
+1. `cp server/.env.example server/.env` — Postgres credentials live here
+2. `docker compose --env-file server/.env up -d` (Postgres on 5433, Redis on 6380)
+3. `cd server && npm install`
 4. `npm run db:migrate` — apply migrations
 5. `npm run db:seed` — two departments (CSE, ECE), the bootstrap admin from
    `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`, demo faculty / lab in-charges /
@@ -19,6 +19,7 @@ See `CLAUDE.md` for the full specification.
 
 `npm test` — requires Docker. Integration tests start a disposable
 PostgreSQL 16 via Testcontainers and run the real migrations against it.
+Its credentials come from `POSTGRES_*` in `server/.env` (or the environment).
 
 ## Concurrency: what the exclusion constraint doesn't solve
 
