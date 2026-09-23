@@ -50,7 +50,54 @@ A booking has exactly one accountable user — the booker. Group usage is repres
 A user may only view and book resources whose `department_id` matches their own. Admins see all departments. This is checked in the policy layer, not by filtering in the UI. Seed data must include two departments so the scoping is actually demonstrable.
 
 **Same-day bookings only.**
-A booking's `period` must start and end on the same calendar date in IST, and must not exceed the resource's `max_slot_minutes`. Reject violations with `MULTI_DAY_NOT_SUPPORTED` (422). Multi-day equipment loans are documented as future work in the README — do not build them.
+A booking's `period` must start and end on the same calendar date in IST — reject violations with `MULTI_DAY_NOT_SUPPORTED` (422). Separately, it must not exceed the resource's `max_slot_minutes` (`SLOT_TOO_LONG`) or fall below `min_slot_minutes` (`SLOT_TOO_SHORT`). These are distinct rules with distinct codes. Multi-day equipment loans are documented as future work in the README — do not build them.
+
+---
+
+## 2c. Amendments ratified after Phase 1
+
+These supersede anything earlier in this file that conflicts with them.
+
+**Schema additions.** `refresh_tokens` (id, user_id, family_id, rotated_at, revoked_at, expires_at) is part of the model — reuse detection requires it. The row's `id` **is** the JWT ID (`jti`) and serves as the lookup key; **the token itself is never stored, in any form, hashed or otherwise.** A database leak must not yield anything replayable, since validity still depends on the signing secret. Extensions enabled: `btree_gist`, `pgcrypto`, `citext`.
+
+**Audit log.** `audit_log` (id, actor_id nullable, entity_type, entity_id uuid, action, before jsonb, after jsonb, created_at). `writeAudit()` is exposed **only** on transaction-scoped repositories, so calling it outside a mutation's transaction is a compile error. Take a `SELECT … FOR UPDATE` row lock before capturing the `before` snapshot. Snapshots recursively drop any key containing `password`, `secret` or `token`. No-op changes are still logged. The table is append-only, enforced by a `BEFORE UPDATE OR DELETE` trigger that raises.
+
+**Cross-department listing** (`GET /api/resources?departmentId=<other>`) returns 403 FORBIDDEN, not 404 — department IDs are public, so there is no existence to conceal. The 404 rule below applies to individual resources only.
+
+**Advisory lock before booking insert.** The exclusion constraint alone deadlocks under burst contention: concurrent inserts each block on the others' uncommitted rows, and Postgres resolves deadlocks roughly once per second, producing 500s and multi-second latency. `BookingRepository.insert` therefore takes a per-resource **transaction-scoped** advisory lock (`pg_advisory_xact_lock`, key derived deterministically via `hashtextextended(resource_id::text, 0)`) immediately before the INSERT. The lock only serializes inserts per resource — it performs no overlap checking. The exclusion constraint remains the sole mechanism that rejects overlaps, and a test must prove this by removing the constraint while keeping the lock and observing the concurrency test fail.
+
+**Additional error codes:** `SLOT_TOO_SHORT` (422), `CAPACITY_EXCEEDED` (422, capacity 0 means unlimited), `IDEMPOTENCY_KEY_REUSED` (422, same key with a different body), `INVALID_TRANSITION` (409).
+
+**Booking visibility.** `booking:view` is granted to the booker, the resource's owners, and admins. Everyone else receives 404. Listing applies the same rule. The availability endpoint returns busy intervals and their status only — never the identity of the booker — and accepts a window of at most 31 days.
+
+**Admins may not book outside their department.** They can see the resource, so they receive `WRONG_DEPARTMENT` (403); students cannot see it, so they receive 404.
+
+**Additional endpoints** (beyond §9):
+```
+GET    /api/departments                 public — signup form needs it
+GET    /api/resources/:id
+DELETE /api/resources/:id               soft delete, sets is_active = false
+PATCH  /api/users/:id/role              admin only, never on own account
+PATCH  /api/resources/:id/owners        TO BUILD IN PHASE 3
+```
+
+**Additional policy actions:** `resource:view`, `user:change_role`, plus `defaultResourceScope(actor)` for list scoping (admins → all departments, everyone else → own).
+
+**Resource creation is admin-only.** "Owner or admin" cannot apply before a resource has owners.
+
+**Cross-department resource access returns `404 NOT_FOUND`, not 403.** Do not confirm the existence of resources outside the actor's department. `WRONG_DEPARTMENT` (403) is reserved for cases where the actor can legitimately see the resource but may not act on it — e.g. booking a visible resource in another department.
+
+**Authorization ordering.** Routes may load an entity through the service in order to authorize against it, then call `can()` before any mutation. The rule is "no mutation before `can()`", not "no read before `can()`".
+
+**Audit log is active from Phase 1 onward.** Create `audit_log` and a `writeAudit()` helper called inside the same transaction as the mutation. Wire it into role changes and resource create/update/delete immediately — do not defer to Phase 3.
+
+**Soft delete everywhere.** Rows referenced by bookings are never hard-deleted.
+
+**Request bodies reject unknown fields** with 400. A `role` field in the signup body is an error, not silently ignored.
+
+**Versions:** Node 22, Prisma 6.19, Express 5, Zod 4. (Supersedes the Node 20 line in §3.)
+
+**Cookies:** refresh token scoped to `/api/auth`; `SameSite=None; Secure` in production, `Lax` in development.
 
 ---
 
