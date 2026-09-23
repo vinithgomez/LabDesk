@@ -147,3 +147,43 @@ describe("policy: resource:manage_owners", () => {
     expect(denial(actor("faculty"), "resource:manage_owners", lab).code).toBe("FORBIDDEN");
   });
 });
+
+describe("policy: booking:approve", () => {
+  const owners = [
+    { userId: "l1", approvalLevel: 1 },
+    { userId: "l2", approvalLevel: 2 },
+  ];
+  const subject = (overrides: Partial<{ userId: string; nextLevel: number | null; deciderIds: string[]; departmentId: string }> = {}) => ({
+    id: "b-1",
+    userId: overrides.userId ?? "student-1",
+    status: "pending" as const,
+    resource: { id: "r-1", departmentId: overrides.departmentId ?? DEPT_A, ownerIds: owners.map((o) => o.userId), owners },
+    nextLevel: overrides.nextLevel === undefined ? 1 : overrides.nextLevel,
+    deciderIds: overrides.deciderIds ?? [],
+  });
+  const l1 = actor("faculty", { id: "l1" });
+  const l2 = actor("lab_incharge", { id: "l2" });
+
+  it("admits only the owner at the awaited level, or a same-department admin", () => {
+    expect(can(l1, "booking:approve", subject())).toBe(true);
+    expect(can(l2, "booking:approve", subject())).toBe(false);
+    expect(can(l2, "booking:approve", subject({ nextLevel: 2, deciderIds: ["l1"] }))).toBe(true);
+    expect(can(actor("admin"), "booking:approve", subject())).toBe(true);
+    expect(can(actor("admin"), "booking:approve", subject({ departmentId: DEPT_B }))).toBe(false);
+    expect(can(actor("faculty", { id: "nobody" }), "booking:approve", subject())).toBe(false);
+  });
+
+  it("never lets anyone decide their own booking or decide twice", () => {
+    expect(can(l1, "booking:approve", subject({ userId: "l1" }))).toBe(false);
+    expect(can(actor("admin"), "booking:approve", subject({ userId: "admin-1" }))).toBe(false);
+    expect(can(actor("admin"), "booking:approve", subject({ nextLevel: 2, deciderIds: ["admin-1"] }))).toBe(false);
+  });
+
+  it("explains denials", () => {
+    expect(denial(l2, "booking:approve", subject()).message).toBe("This booking is awaiting level 1 approval");
+    expect(denial(l1, "booking:approve", subject({ userId: "l1" })).message).toMatch(/own booking/);
+    expect(denial(actor("admin"), "booking:approve", subject({ departmentId: DEPT_B })).code).toBe("WRONG_DEPARTMENT");
+    expect(denial(actor("student", { id: "x" }), "booking:approve", subject()).code).toBe("NOT_FOUND");
+    expect(denial(actor("student"), "booking:approve", subject()).code).toBe("FORBIDDEN");
+  });
+});

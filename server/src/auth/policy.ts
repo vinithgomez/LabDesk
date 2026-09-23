@@ -48,6 +48,17 @@ export interface ResourceOwnersSubject {
   departmentId: string;
 }
 
+/**
+ * Subject for `booking:approve` (which also covers reject): the booking, its
+ * resource's owners with their approval levels, the level now awaiting a
+ * decision (null if none is), and everyone who has already decided.
+ */
+export interface ApprovalSubject extends BookingSubject {
+  resource: BookingSubject["resource"] & { owners: readonly { userId: string; approvalLevel: number }[] };
+  nextLevel: number | null;
+  deciderIds: readonly string[];
+}
+
 export interface PolicySubjects {
   "resource:view": ResourceViewSubject;
   "resource:manage": ResourceManageSubject;
@@ -56,6 +67,7 @@ export interface PolicySubjects {
   "booking:create": BookingCreateSubject;
   "booking:view": BookingSubject;
   "booking:cancel": BookingSubject;
+  "booking:approve": ApprovalSubject;
 }
 
 export type Action = keyof PolicySubjects;
@@ -106,6 +118,22 @@ const rules: { [A in Action]: Rule<A> } = {
     isAdmin(actor) ||
     ownsResource(actor, b.resource) ||
     (b.userId === actor.id && !BOOKER_CANNOT_CANCEL.includes(b.status)),
+
+  // §6: resource owner with matching approval level, OR admin; never your
+  // own booking. Also: one decision per person per booking (so nobody
+  // satisfies both levels), and only within the actor's own department (an
+  // admin sees other departments but does not decide for them). When no level
+  // is awaiting a decision, any would-be approver passes here so the state
+  // machine can report why the booking can't be decided (409).
+  "booking:approve": (actor, s) => {
+    if (actor.role === "student") return false;
+    if (s.userId === actor.id || s.deciderIds.includes(actor.id)) return false;
+    if (s.resource.departmentId !== actor.departmentId) return false;
+    if (isAdmin(actor)) return true;
+    return s.resource.owners.some(
+      (o) => o.userId === actor.id && (s.nextLevel === null || o.approvalLevel === s.nextLevel),
+    );
+  },
 };
 
 export function can<A extends Action>(actor: Actor, action: A, subject: PolicySubjects[A]): boolean {
@@ -160,6 +188,24 @@ const denials: { [A in Action]?: Denial<A> } = {
   // A booking you may not see is indistinguishable from one that doesn't exist.
   "booking:view": () => bookingNotFound(),
   "booking:cancel": (actor, b) => (can(actor, "booking:view", b) ? null : bookingNotFound()),
+  "booking:approve": (actor, s) => {
+    if (!can(actor, "booking:view", s)) return bookingNotFound();
+    if (s.resource.departmentId !== actor.departmentId) {
+      return new DomainError("WRONG_DEPARTMENT", "You can only decide bookings in your own department");
+    }
+    if (s.userId === actor.id) return new DomainError("FORBIDDEN", "You cannot approve or reject your own booking");
+    if (s.deciderIds.includes(actor.id)) {
+      return new DomainError(
+        "FORBIDDEN",
+        "You have already decided on this booking; a different approver must decide the next level",
+      );
+    }
+    const ownsAnotherLevel = s.resource.owners.some((o) => o.userId === actor.id);
+    if (ownsAnotherLevel && s.nextLevel !== null) {
+      return new DomainError("FORBIDDEN", `This booking is awaiting level ${s.nextLevel} approval`);
+    }
+    return null;
+  },
 };
 
 /** The error to raise after `can()` returned false. */

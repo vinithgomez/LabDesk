@@ -58,6 +58,12 @@ const range = (from: Date, to: Date): Prisma.Sql =>
   Prisma.sql`tstzrange(${from.toISOString()}::timestamptz, ${to.toISOString()}::timestamptz, '[)')`;
 
 export interface NewBooking {
+  /**
+   * The state a booking is born in (not a transition): 'pending' when the
+   * resource requires approval, otherwise 'approved'. Every later status
+   * change goes through transitionBooking.
+   */
+  initialStatus: "pending" | "approved";
   resourceId: string;
   userId: string;
   startsAt: Date;
@@ -180,7 +186,7 @@ export class BookingWriter extends BookingReader {
   }
 
   /**
-   * Inserts a booking. New bookings always start as 'pending' (CLAUDE.md §5).
+   * Inserts a booking in its initial status (see NewBooking.initialStatus).
    *
    * Overlap is rejected by the `bookings_no_overlap` exclusion constraint,
    * never by a pre-check. Before inserting we take a transaction-scoped
@@ -205,7 +211,7 @@ export class BookingWriter extends BookingReader {
               ${b.resourceId}::uuid,
               ${b.userId}::uuid,
               ${range(b.startsAt, b.endsAt)},
-              'pending',
+              ${b.initialStatus}::booking_status,
               ${b.purpose},
               ${b.attendeeCount},
               ${b.idempotencyKey}

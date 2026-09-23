@@ -1,11 +1,11 @@
 import { Router } from "express";
 import { z } from "zod";
-import { bookingListScope, can, denial, type BookingSubject } from "../auth/policy.js";
-import { BOOKING_STATUSES } from "../domain/types.js";
+import { bookingListScope, can, denial, type ApprovalSubject, type BookingSubject } from "../auth/policy.js";
+import { APPROVAL_DECISIONS, BOOKING_STATUSES } from "../domain/types.js";
 import { actorOf, requireAuth } from "../http/authenticate.js";
 import { isoDateTime, respond } from "../http/respond.js";
 import type { AuthService } from "../services/auth.service.js";
-import type { BookingService, BookingView } from "../services/booking.service.js";
+import type { ApprovalState, BookingService, BookingView } from "../services/booking.service.js";
 import type { ResourceService } from "../services/resource.service.js";
 import { idParams } from "./schemas.js";
 
@@ -55,6 +55,9 @@ export const listBookingsQuery = z
 // Cancel takes no body; anything sent is rejected like any unknown field.
 export const cancelBookingBody = z.strictObject({}).optional();
 
+/** Approve / reject: an optional comment recorded with the decision. */
+export const decisionBody = z.strictObject({ comment: z.string().trim().max(1000).default("") }).optional();
+
 // ---- Response schemas -----------------------------------------------------
 
 export const bookingDto = z.object({
@@ -72,9 +75,25 @@ export const bookingDto = z.object({
 });
 export const bookingListDto = z.array(bookingDto);
 
+export const approvalDto = z.object({
+  level: z.number(),
+  approverId: z.string(),
+  decision: z.enum(APPROVAL_DECISIONS),
+  comment: z.string(),
+  decidedAt: isoDateTime,
+});
+
+/** A booking with its approval trail and the level awaiting a decision (null if none). */
+export const bookingWithApprovalsDto = bookingDto.extend({
+  approvals: z.array(approvalDto),
+  awaitingLevel: z.number().nullable(),
+});
+
 export type CreateBookingBody = z.input<typeof createBookingBody>;
 export type ListBookingsQuery = z.input<typeof listBookingsQuery>;
 export type BookingDto = z.output<typeof bookingDto>;
+export type DecisionBody = z.input<typeof decisionBody>;
+export type BookingWithApprovalsDto = z.output<typeof bookingWithApprovalsDto>;
 
 export const IDEMPOTENT_REPLAY = "IDEMPOTENT_REPLAY";
 
@@ -89,6 +108,22 @@ const subjectOf = ({ booking, resource }: BookingView): BookingSubject => ({
   userId: booking.userId,
   status: booking.status,
   resource: { id: resource.id, departmentId: resource.departmentId, ownerIds: resource.ownerIds },
+});
+
+export const approvalSubjectOf = (state: ApprovalState): ApprovalSubject => {
+  const base = subjectOf(state);
+  return {
+    ...base,
+    resource: { ...base.resource, owners: state.resource.owners },
+    nextLevel: state.progress.nextLevel,
+    deciderIds: state.progress.deciderIds,
+  };
+};
+
+const withApprovals = (state: ApprovalState) => ({
+  ...toBookingDto(state.booking),
+  approvals: state.approvals,
+  awaitingLevel: state.progress.nextLevel,
 });
 
 // ---- Router ---------------------------------------------------------------
@@ -141,11 +176,11 @@ export function bookingsRouter(auth: AuthService, bookings: BookingService, reso
     const actor = actorOf(req);
     const { id } = idParams.parse(req.params);
 
-    const view = await bookings.get(id);
-    const subject = subjectOf(view);
+    const state = await bookings.getApprovalState(id);
+    const subject = subjectOf(state);
     if (!can(actor, "booking:view", subject)) throw denial(actor, "booking:view", subject);
 
-    respond(res, 200, bookingDto, toBookingDto(view.booking));
+    respond(res, 200, bookingWithApprovalsDto, withApprovals(state));
   });
 
   router.post("/:id/cancel", async (req, res) => {
@@ -158,6 +193,24 @@ export function bookingsRouter(auth: AuthService, bookings: BookingService, reso
 
     respond(res, 200, bookingDto, toBookingDto(await bookings.transitionBooking(id, "cancel", actor)));
   });
+
+  // Approve and reject are both booking:approve decisions. The route
+  // authorizes against the level awaiting a decision right now and passes
+  // that level on; transitionBooking re-checks it under a row lock.
+  for (const action of ["approve", "reject"] as const) {
+    router.post(`/:id/${action}`, async (req, res) => {
+      const actor = actorOf(req);
+      const { id } = idParams.parse(req.params);
+      const { comment } = decisionBody.parse(req.body) ?? { comment: "" };
+
+      const state = await bookings.getApprovalState(id);
+      const subject = approvalSubjectOf(state);
+      if (!can(actor, "booking:approve", subject)) throw denial(actor, "booking:approve", subject);
+
+      await bookings.transitionBooking(id, action, actor, { level: state.progress.nextLevel, comment });
+      respond(res, 200, bookingWithApprovalsDto, withApprovals(await bookings.getApprovalState(id)));
+    });
+  }
 
   return router;
 }

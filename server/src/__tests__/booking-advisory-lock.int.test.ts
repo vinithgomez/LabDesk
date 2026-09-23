@@ -67,6 +67,7 @@ describe("per-resource booking advisory lock", () => {
       h.prisma,
       async (tx) => {
         await new BookingWriter(tx).insert({
+          initialStatus: "pending",
           resourceId,
           userId: user.id,
           startsAt: new Date(slot.start),

@@ -34,7 +34,8 @@ beforeEach(async () => {
   owner = await registerUser(h, { email: "owner@college.edu", departmentId: dept, role: "faculty" });
   otherFaculty = await registerUser(h, { email: "faculty@college.edu", departmentId: dept, role: "faculty" });
   admin = await registerUser(h, { email: "admin@college.edu", departmentId: dept, role: "admin" });
-  lab = await createResource(h.prisma, { departmentId: dept, ownerIds: [owner.id] });
+  // Requires approval, so new bookings stay 'pending' while these tests act on them.
+  lab = await createResource(h.prisma, { departmentId: dept, ownerIds: [owner.id], requiresApproval: true });
 });
 
 let slotHour = 8;

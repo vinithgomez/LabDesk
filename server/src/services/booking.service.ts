@@ -1,6 +1,8 @@
+import { approvalProgress, type ApprovalProgress } from "../domain/approvals.js";
+import type { AuditAction } from "../domain/audit.js";
 import { assertBookableSlot } from "../domain/booking-rules.js";
 import { bookingNotFound, DomainError, resourceNotFound } from "../domain/errors.js";
-import type { Actor, Booking, BookingListScope, BookingStatus, Resource } from "../domain/types.js";
+import type { Actor, Booking, BookingApproval, BookingListScope, BookingStatus, Resource } from "../domain/types.js";
 import type { BookingListFilter, HeldSlot } from "../repositories/booking.repository.js";
 import { IDEMPOTENCY_INDEX } from "../repositories/booking.repository.js";
 import { ConstraintViolation } from "../repositories/constraint-violation.js";
@@ -30,23 +32,43 @@ export interface BookingView {
   resource: Resource;
 }
 
+/** Everything an approval decision is authorized and validated against. */
+export interface ApprovalState extends BookingView {
+  approvals: BookingApproval[];
+  progress: ApprovalProgress;
+}
+
+export interface DecisionInput {
+  /**
+   * The level the caller was authorized to decide (ApprovalState.progress.
+   * nextLevel when it called can()). transitionBooking re-reads the state
+   * under a row lock and refuses if another decision landed in between.
+   */
+  level: number | null;
+  comment: string;
+}
+
 export interface Availability {
   held: HeldSlot[];
   maintenance: MaintenanceSlot[];
 }
 
 /**
- * The booking state machine (CLAUDE.md §5). Phase 2 implements `cancel`;
- * Phase 3 adds approve/reject, Phase 4 check-in/out and the no-show sweeper.
+ * The booking state machine (CLAUDE.md §5). Phases 2–3 implement cancel,
+ * approve and reject; Phase 4 adds check-in/out and the no-show sweeper.
  */
-export type BookingAction = "cancel";
+export type BookingAction = "cancel" | "approve" | "reject";
+export type DecisionAction = Exclude<BookingAction, "cancel">;
 
 const TRANSITIONS: Record<BookingAction, { from: readonly BookingStatus[]; to: BookingStatus }> = {
   // Cancel is forbidden once checked_in or completed (§5); terminal states stay terminal.
   cancel: { from: ["pending", "approved"], to: "cancelled" },
+  // An approve on a multi-level booking records its level and only moves
+  // the status once the final level approves.
+  approve: { from: ["pending"], to: "approved" },
+  // A rejection at any level is final; it never falls through to the next level.
+  reject: { from: ["pending"], to: "rejected" },
 };
-
-const AUDIT_ACTION: Record<BookingAction, "booking.cancelled"> = { cancel: "booking.cancelled" };
 
 /** SQLSTATE 23P01 — exclusion_violation. */
 const EXCLUSION_VIOLATION = "23P01";
@@ -94,6 +116,8 @@ export class BookingService {
         let booking: Booking;
         try {
           booking = await tx.bookings.insert({
+            // Resources that don't require approval skip the pending state.
+            initialStatus: resource.requiresApproval ? "pending" : "approved",
             resourceId: resource.id,
             userId: actor.id,
             startsAt: input.startsAt,
@@ -137,6 +161,13 @@ export class BookingService {
     return { booking, resource };
   }
 
+  /** The booking, its resource and its approval progress, for booking:approve. */
+  async getApprovalState(id: string): Promise<ApprovalState> {
+    const view = await this.get(id);
+    const approvals = await this.uow.read.approvals.listForBooking(id);
+    return { ...view, approvals, progress: approvalProgress(view.resource, approvals) };
+  }
+
   /** `scope` must come from the policy module (`bookingListScope`). */
   async list(scope: BookingListScope, filter: BookingListFilter): Promise<BookingView[]> {
     const bookings = await this.uow.read.bookings.list(scope, filter);
@@ -149,10 +180,21 @@ export class BookingService {
   }
 
   /**
-   * The single place a booking's status changes (§5). Callers must have
-   * passed the matching `can()` check first.
+   * The single place a booking's status changes (§5), and the only writer of
+   * approval decisions. Callers must have passed the matching `can()` check
+   * first (booking:cancel, or booking:approve for approve/reject).
+   *
+   * Runs under a FOR UPDATE lock on the booking, so concurrent decisions on
+   * one booking serialize and each sees the other's result.
    */
-  transitionBooking(bookingId: string, action: BookingAction, actor: Actor): Promise<Booking> {
+  transitionBooking(bookingId: string, action: "cancel", actor: Actor): Promise<Booking>;
+  transitionBooking(bookingId: string, action: DecisionAction, actor: Actor, decision: DecisionInput): Promise<Booking>;
+  transitionBooking(
+    bookingId: string,
+    action: BookingAction,
+    actor: Actor,
+    decision?: DecisionInput,
+  ): Promise<Booking> {
     const rule = TRANSITIONS[action];
     return this.uow.transaction(async (tx) => {
       await tx.bookings.lockById(bookingId);
@@ -162,16 +204,70 @@ export class BookingService {
         throw new DomainError("INVALID_TRANSITION", `Cannot ${action} a booking that is ${before.status}`);
       }
 
-      const after = await tx.bookings.updateStatus(bookingId, rule.to);
+      if (action === "cancel") {
+        const after = await tx.bookings.updateStatus(bookingId, rule.to);
+        await tx.writeAudit({
+          actorId: actor.id,
+          entityType: "booking",
+          entityId: bookingId,
+          action: "booking.cancelled",
+          before,
+          after,
+        });
+        // Phase 5: freeing a slot triggers waitlist promotion here.
+        return after;
+      }
+
+      if (!decision) throw new Error(`${action} requires a decision`);
+      const resource = await tx.resources.findById(before.resourceId);
+      if (!resource) throw bookingNotFound();
+      const approvals = await tx.approvals.listForBooking(bookingId);
+      const progress = approvalProgress(resource, approvals);
+
+      // The caller was authorized for a specific level. If another decision
+      // landed first, that authorization no longer describes this booking.
+      if (progress.nextLevel === null || progress.nextLevel !== decision.level) {
+        throw new DomainError(
+          "INVALID_TRANSITION",
+          "This booking's approval state changed while you were deciding; reload and try again",
+        );
+      }
+      // A pending booking whose start has passed can't usefully be approved;
+      // it can still be rejected, which closes it out.
+      if (action === "approve" && this.now().getTime() >= before.startsAt.getTime()) {
+        throw new DomainError("INVALID_TRANSITION", "This booking has already started and can no longer be approved");
+      }
+
+      let approval: BookingApproval;
+      try {
+        approval = await tx.approvals.insert({
+          bookingId,
+          level: progress.nextLevel,
+          approverId: actor.id,
+          decision: action === "approve" ? "approved" : "rejected",
+          comment: decision.comment,
+        });
+      } catch (err) {
+        if (err instanceof ConstraintViolation && err.sqlState === UNIQUE_VIOLATION) {
+          // Backstop for UNIQUE(booking_id, level) / (booking_id, approver_id).
+          throw new DomainError("INVALID_TRANSITION", "This approval decision has already been made");
+        }
+        throw err;
+      }
+
+      const final = action === "reject" || progress.nextLevel === progress.requiredLevels;
+      const after = final ? await tx.bookings.updateStatus(bookingId, rule.to) : before;
+      const auditAction: AuditAction =
+        action === "reject" ? "booking.rejected" : final ? "booking.approved" : "booking.level_approved";
       await tx.writeAudit({
         actorId: actor.id,
         entityType: "booking",
         entityId: bookingId,
-        action: AUDIT_ACTION[action],
-        before,
-        after,
+        action: auditAction,
+        before: { ...before, approvals },
+        after: { ...after, approvals: [...approvals, approval] },
       });
-      // Phase 5: freeing a slot triggers waitlist promotion here.
+      // Phase 5: a rejection frees the slot and triggers waitlist promotion here.
       return after;
     });
   }

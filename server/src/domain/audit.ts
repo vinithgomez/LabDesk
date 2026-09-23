@@ -13,7 +13,10 @@ export type AuditAction =
   | "resource.deactivated"
   | "resource.owners_changed"
   | "booking.created"
-  | "booking.cancelled";
+  | "booking.cancelled"
+  | "booking.level_approved"
+  | "booking.approved"
+  | "booking.rejected";
 
 export interface AuditEntry {
   /** null is reserved for system actors (scheduled jobs in later phases). */

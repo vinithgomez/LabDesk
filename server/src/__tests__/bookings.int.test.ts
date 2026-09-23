@@ -41,15 +41,16 @@ beforeEach(async () => {
 const bookingCount = (): Promise<number> => h.prisma.booking.count();
 
 describe("POST /api/bookings", () => {
-  it("creates a pending booking in UTC and records an audit row", async () => {
+  it("creates a booking in UTC and records an audit row", async () => {
     const slot = istSlot(1, "10:00", "11:00");
     const res = await book(h, student, { resourceId: lab, ...slot, purpose: "OS lab", attendeeCount: 4 });
 
+    // `lab` does not require approval, so the booking is born 'approved'.
     expect(res.status).toBe(201);
     expect(res.body.data).toMatchObject({
       resourceId: lab,
       userId: student.id,
-      status: "pending",
+      status: "approved",
       purpose: "OS lab",
       attendeeCount: 4,
       start: new Date(slot.start).toISOString(),
@@ -61,7 +62,19 @@ describe("POST /api/bookings", () => {
     expect(audit).toHaveLength(1);
     expect(audit[0]).toMatchObject({ actorId: student.id, entityId: res.body.data.id, action: "booking.created" });
     expect(audit[0]?.before).toBeNull();
-    expect(audit[0]?.after).toMatchObject({ status: "pending" });
+    expect(audit[0]?.after).toMatchObject({ status: "approved" });
+  });
+
+  it("creates bookings as 'pending' on resources that require approval", async () => {
+    const gated = await createResource(h.prisma, {
+      departmentId: deptA,
+      name: "Gated Lab",
+      requiresApproval: true,
+      ownerIds: [admin.id],
+    });
+    const res = await book(h, student, { resourceId: gated, ...istSlot(1, "10:00", "11:00") });
+    expect(res.status).toBe(201);
+    expect(res.body.data.status).toBe("pending");
   });
 
   it("requires an Idempotency-Key header", async () => {
@@ -211,7 +224,7 @@ describe("GET /api/resources/:id/availability", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.busy).toEqual([
-      { kind: "booking", status: "pending", start: kept.body.data.start, end: kept.body.data.end },
+      { kind: "booking", status: "approved", start: kept.body.data.start, end: kept.body.data.end },
       {
         kind: "maintenance",
         start: new Date(istSlot(1, "14:00", "15:00").start).toISOString(),
