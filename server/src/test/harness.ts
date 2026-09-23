@@ -16,7 +16,14 @@ export interface TestHarness {
 
 export function createHarness(): TestHarness {
   const databaseUrl = inject("databaseUrl");
-  const config: AppConfig = {
+  const config = testConfig(databaseUrl);
+  const prisma = createPrismaClient(databaseUrl);
+  const app = createApp({ config, logger: createLogger("silent"), services: createServices(prisma, config) });
+  return { app, prisma, close: () => prisma.$disconnect() };
+}
+
+export function testConfig(databaseUrl: string): AppConfig {
+  return {
     nodeEnv: "test",
     port: 0,
     databaseUrl,
@@ -28,9 +35,6 @@ export function createHarness(): TestHarness {
     bcryptRounds: 4,
     logLevel: "silent",
   };
-  const prisma = createPrismaClient(databaseUrl);
-  const app = createApp({ config, logger: createLogger("silent"), services: createServices(prisma, config) });
-  return { app, prisma, close: () => prisma.$disconnect() };
 }
 
 export async function resetDatabase(prisma: PrismaClient): Promise<void> {
