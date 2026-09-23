@@ -52,6 +52,7 @@ model User {
   createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   department     Department      @relation(fields: [departmentId], references: [id], onDelete: Restrict)
   ownedResources ResourceOwner[]
+  refreshTokens  RefreshToken[]
 
   @@index([departmentId])
   @@map("users")
@@ -92,3 +93,20 @@ model ResourceOwner {
   @@map("resource_owners")
 }
 
+// Server-side record of issued refresh tokens, required for rotation and
+// reuse detection. Every token belongs to a family (one login session);
+// presenting an already-rotated token revokes the whole family.
+model RefreshToken {
+  id        String    @id @db.Uuid
+  familyId  String    @map("family_id") @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  rotatedAt DateTime? @map("rotated_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([familyId])
+  @@index([userId])
+  @@map("refresh_tokens")
+}
