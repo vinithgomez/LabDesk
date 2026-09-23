@@ -55,6 +55,36 @@ function createBarrier(parties: number, timeoutMs: number, beforeRelease: () => 
   };
 }
 
+/**
+ * Opens `size` pooled connections one at a time and holds them all open
+ * together, so the pool is fully established before the contended phase.
+ * Prisma opens connections lazily; 50 simultaneous TCP connects through
+ * Docker Desktop's port proxy intermittently fail (P1001), which would be a
+ * test-environment failure unrelated to what this test is about.
+ */
+async function warmPool(client: PrismaClient, size: number): Promise<void> {
+  let releaseAll!: () => void;
+  const gate = new Promise<void>((resolve) => (releaseAll = resolve));
+  const held: Promise<void>[] = [];
+  for (let i = 0; i < size; i += 1) {
+    let opened!: () => void;
+    const isOpen = new Promise<void>((resolve) => (opened = resolve));
+    held.push(
+      client.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT 1`;
+          opened();
+          await gate;
+        },
+        { maxWait: 30_000, timeout: 60_000 },
+      ),
+    );
+    await isOpen;
+  }
+  releaseAll();
+  await Promise.all(held);
+}
+
 /** Tomorrow 10:00–11:00 IST: same IST day, 60 minutes, inside any sane horizon. */
 function tomorrowSlotIST(): { start: string; end: string } {
   const istDate = new Date(Date.now() + 86_400_000 + 330 * 60_000).toISOString().slice(0, 10);
@@ -146,6 +176,7 @@ describe("booking concurrency", () => {
         logger: createLogger("silent"),
         services: createServices(contended, config, { uow: barrierUow }),
       });
+      await warmPool(contended, PARTIES);
       const server: Server = app.listen(0);
 
       try {
@@ -168,7 +199,15 @@ describe("booking concurrency", () => {
 
         const created = responses.filter((r) => r.status === 201);
         const conflicts = responses.filter((r) => r.status === 409 && r.body?.error?.code === "SLOT_CONFLICT");
-        expect({ created: created.length, conflicts: conflicts.length }).toEqual({ created: 1, conflicts: PARTIES - 1 });
+        // Anything else is listed verbatim so a failure explains itself.
+        const unexpected = responses
+          .filter((r) => !created.includes(r) && !conflicts.includes(r))
+          .map((r) => `${r.status} ${JSON.stringify(r.body)}`);
+        expect({ created: created.length, conflicts: conflicts.length, unexpected }).toEqual({
+          created: 1,
+          conflicts: PARTIES - 1,
+          unexpected: [],
+        });
 
         const [stored] = z
           .array(z.object({ n: z.number() }))

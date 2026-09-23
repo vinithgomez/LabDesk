@@ -36,6 +36,9 @@ const BOOKING_COLUMNS = Prisma.sql`
   b.created_at            AS "createdAt",
   b.updated_at            AS "updatedAt"`;
 
+/** Advisory-lock namespace (first key) for per-resource booking inserts ("LD"). */
+const BOOKING_INSERT_LOCK_NAMESPACE = 0x4c44;
+
 export interface NewBooking {
   resourceId: string;
   userId: string;
@@ -66,10 +69,23 @@ function single(rows: unknown): Booking {
 export class BookingRepository {
   constructor(private readonly db: DbClient) {}
 
-  /** New bookings always start as 'pending' (CLAUDE.md §5); approvals are Phase 3. */
+  /**
+   * Inserts a booking. New bookings always start as 'pending' (CLAUDE.md §5).
+   * Must run inside a transaction.
+   *
+   * Overlap is rejected by the `bookings_no_overlap` exclusion constraint,
+   * never by a pre-check. Before inserting we take a transaction-scoped
+   * advisory lock on the resource. It checks nothing; it only orders
+   * concurrent inserts for one resource. Without it, simultaneous inserters
+   * each find the other's uncommitted row, wait on each other, and deadlock
+   * (40P01) — Postgres then breaks one cycle per deadlock_timeout, so a burst
+   * on a popular slot turns into 500s and multi-second stalls. With it, each
+   * later inserter sees the committed winner and fails fast with 23P01.
+   */
   insert(b: NewBooking): Promise<Booking> {
-    return translatingConstraints(async () =>
-      single(
+    return translatingConstraints(async () => {
+      await this.db.$executeRaw`SELECT pg_advisory_xact_lock(${BOOKING_INSERT_LOCK_NAMESPACE}::int, hashtext(${b.resourceId}))`;
+      return single(
         await this.db.$queryRaw`
           WITH inserted AS (
             INSERT INTO bookings (resource_id, user_id, period, status, purpose, attendee_count, idempotency_key)
@@ -85,8 +101,8 @@ export class BookingRepository {
             RETURNING *
           )
           SELECT ${BOOKING_COLUMNS} FROM inserted b`,
-      ),
-    );
+      );
+    });
   }
 
   async findById(id: string): Promise<Booking | null> {

@@ -17,7 +17,8 @@ export type DomainErrorCode =
   | "FORBIDDEN"
   /** Reserved for a later phase: visible resource, action not permitted. Not returned by any current route. */
   | "WRONG_DEPARTMENT"
-  | "NOT_FOUND";
+  | "NOT_FOUND"
+  | "SLOT_CONFLICT";
 
 export class DomainError extends Error {
   constructor(

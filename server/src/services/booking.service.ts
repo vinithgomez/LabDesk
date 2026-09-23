@@ -1,5 +1,6 @@
-import { resourceNotFound } from "../domain/errors.js";
+import { DomainError, resourceNotFound } from "../domain/errors.js";
 import type { Actor, Booking } from "../domain/types.js";
+import { ConstraintViolation } from "../repositories/constraint-violation.js";
 import type { UnitOfWork } from "../repositories/index.js";
 
 export interface CreateBookingInput {
@@ -24,15 +25,38 @@ export class BookingService {
       const resource = await tx.resources.findById(input.resourceId);
       if (!resource) throw resourceNotFound();
 
-      return tx.bookings.insert({
-        resourceId: resource.id,
-        userId: actor.id,
-        startsAt: input.startsAt,
-        endsAt: input.endsAt,
-        purpose: input.purpose,
-        attendeeCount: input.attendeeCount,
-        idempotencyKey: input.idempotencyKey,
-      });
+      try {
+        return await tx.bookings.insert({
+          resourceId: resource.id,
+          userId: actor.id,
+          startsAt: input.startsAt,
+          endsAt: input.endsAt,
+          purpose: input.purpose,
+          attendeeCount: input.attendeeCount,
+          idempotencyKey: input.idempotencyKey,
+        });
+      } catch (err) {
+        throw toSlotConflict(err);
+      }
     });
   }
+}
+
+/** SQLSTATE 23P01 — exclusion_violation. */
+const EXCLUSION_VIOLATION = "23P01";
+
+/**
+ * The overlap check is the database's (`bookings_no_overlap`); there is no
+ * application-level pre-check. A violation means another holding booking
+ * already covers part of the requested period.
+ */
+function toSlotConflict(err: unknown): unknown {
+  if (
+    err instanceof ConstraintViolation &&
+    err.sqlState === EXCLUSION_VIOLATION &&
+    err.constraint === "bookings_no_overlap"
+  ) {
+    return new DomainError("SLOT_CONFLICT", "That time slot overlaps an existing booking for this resource");
+  }
+  return err;
 }
