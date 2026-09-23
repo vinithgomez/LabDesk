@@ -1,0 +1,94 @@
+// LabDesk data model — Phase 1 tables only.
+// Constraints Prisma cannot express (CHECKs, exclusion constraints) live in
+// raw SQL inside the migration files. All timestamps are timestamptz (UTC).
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [btree_gist, pgcrypto, citext]
+}
+
+enum UserRole {
+  student
+  faculty
+  lab_incharge
+  admin
+
+  @@map("user_role")
+}
+
+enum ResourceType {
+  lab
+  room
+  equipment
+
+  @@map("resource_type")
+}
+
+model Department {
+  id        String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  code      String     @unique
+  users     User[]
+  resources Resource[]
+
+  @@map("departments")
+}
+
+model User {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email          String          @unique @db.Citext
+  passwordHash   String          @map("password_hash")
+  fullName       String          @map("full_name")
+  role           UserRole        @default(student)
+  departmentId   String          @map("department_id") @db.Uuid
+  rollNo         String?         @map("roll_no")
+  isActive       Boolean         @default(true) @map("is_active")
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  department     Department      @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  ownedResources ResourceOwner[]
+
+  @@index([departmentId])
+  @@map("users")
+}
+
+model Resource {
+  id                 String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  departmentId       String          @map("department_id") @db.Uuid
+  name               String
+  type               ResourceType
+  location           String
+  capacity           Int
+  description        String          @default("")
+  qrSecret           String          @default(dbgenerated("encode(gen_random_bytes(32), 'hex')")) @map("qr_secret")
+  requiresApproval   Boolean         @default(false) @map("requires_approval")
+  approvalLevels     Int             @default(1) @map("approval_levels") @db.SmallInt
+  minSlotMinutes     Int             @default(30) @map("min_slot_minutes")
+  maxSlotMinutes     Int             @default(180) @map("max_slot_minutes")
+  bookingHorizonDays Int             @default(14) @map("booking_horizon_days")
+  isActive           Boolean         @default(true) @map("is_active")
+  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  department         Department      @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  owners             ResourceOwner[]
+
+  @@index([departmentId])
+  @@map("resources")
+}
+
+model ResourceOwner {
+  resourceId String   @map("resource_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  resource   Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([resourceId, userId])
+  @@index([userId])
+  @@map("resource_owners")
+}
+
