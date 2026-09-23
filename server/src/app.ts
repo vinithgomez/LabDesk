@@ -8,6 +8,7 @@ import { errorHandler, notFoundHandler } from "./http/errors.js";
 import type { Logger } from "./lib/logger.js";
 import { authRouter } from "./routes/auth.routes.js";
 import { departmentsRouter } from "./routes/departments.routes.js";
+import { usersRouter } from "./routes/users.routes.js";
 
 export interface AppDeps {
   config: AppConfig;
@@ -35,6 +36,7 @@ export function createApp({ config, services, logger }: AppDeps): Express {
   });
   app.use("/api/auth", authRouter(services.auth, cookie));
   app.use("/api/departments", departmentsRouter(services.departments));
+  app.use("/api/users", usersRouter(services.auth, services.users));
 
   app.use(notFoundHandler);
   app.use(errorHandler(logger));

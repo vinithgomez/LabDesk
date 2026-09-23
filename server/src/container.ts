@@ -5,10 +5,12 @@ import type { PrismaClient } from "./db/prisma.js";
 import { createUnitOfWork } from "./repositories/index.js";
 import { AuthService } from "./services/auth.service.js";
 import { DepartmentService } from "./services/department.service.js";
+import { UserService } from "./services/user.service.js";
 
 export interface Services {
   auth: AuthService;
   departments: DepartmentService;
+  users: UserService;
 }
 
 /** Wires repositories -> services. The only place that knows the concrete graph. */
@@ -25,5 +27,6 @@ export function createServices(prisma: PrismaClient, config: AppConfig): Service
   return {
     auth: new AuthService(uow, passwords, tokens, config.refreshTokenTtlSeconds),
     departments: new DepartmentService(uow),
+    users: new UserService(uow),
   };
 }
