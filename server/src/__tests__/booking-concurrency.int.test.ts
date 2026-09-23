@@ -6,8 +6,9 @@ import { z } from "zod";
 import { createApp } from "../app.js";
 import { createServices } from "../container.js";
 import { createPrismaClient, type PrismaClient } from "../db/prisma.js";
+import { runInTransaction } from "../db/transaction.js";
 import { createLogger } from "../lib/logger.js";
-import { BookingRepository } from "../repositories/booking.repository.js";
+import { BookingWriter } from "../repositories/booking.repository.js";
 import {
   createRepositories,
   createTxRepositories,
@@ -154,20 +155,24 @@ describe("booking concurrency", () => {
       const barrierUow: UnitOfWork = {
         read: createRepositories(contended),
         transaction: (work) =>
-          contended.$transaction(async (txClient) => {
-            const [row] = z
-              .array(z.object({ pid: z.number() }))
-              .parse(await txClient.$queryRaw`SELECT pg_backend_pid() AS pid`);
-            if (row) backendPids.add(row.pid);
+          runInTransaction(
+            contended,
+            async (txClient) => {
+              const [row] = z
+                .array(z.object({ pid: z.number() }))
+                .parse(await txClient.$queryRaw`SELECT pg_backend_pid() AS pid`);
+              if (row) backendPids.add(row.pid);
 
-            const gated = new BookingRepository(txClient);
-            const insert = gated.insert.bind(gated);
-            gated.insert = async (booking) => {
-              await barrier.arrive();
-              return insert(booking);
-            };
-            return work({ ...createTxRepositories(txClient), bookings: gated });
-          }, TRANSACTION_OPTIONS),
+              const gated = new BookingWriter(txClient);
+              const insert = gated.insert.bind(gated);
+              gated.insert = async (booking) => {
+                await barrier.arrive();
+                return insert(booking);
+              };
+              return work({ ...createTxRepositories(txClient), bookings: gated });
+            },
+            TRANSACTION_OPTIONS,
+          ),
       };
 
       const config = testConfig(inject("databaseUrl"));

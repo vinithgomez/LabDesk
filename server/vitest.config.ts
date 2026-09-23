@@ -11,5 +11,13 @@ export default defineConfig({
     // Integration files share that database and truncate it between tests,
     // so they must not run concurrently.
     fileParallelism: false,
+    // Type-level tests (*.test-d.ts) are compiled by tsc as part of `npm test`,
+    // so compile-time guarantees (e.g. booking inserts require a transaction)
+    // are enforced by the suite, not only by `npm run typecheck`.
+    typecheck: {
+      enabled: true,
+      include: ["src/**/*.test-d.ts"],
+      tsconfig: "./tsconfig.json",
+    },
   },
 });

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { constraintViolationOf, Prisma, type DbClient } from "../db/prisma.js";
+import type { TxClient } from "../db/transaction.js";
 import {
   BOOKING_STATUSES,
   SLOT_HOLDING_STATUSES,
@@ -41,9 +42,6 @@ const BOOKING_COLUMNS = Prisma.sql`
   b.series_id::text       AS "seriesId",
   b.created_at            AS "createdAt",
   b.updated_at            AS "updatedAt"`;
-
-/** Advisory-lock namespace (first key) for per-resource booking inserts ("LD"). */
-const BOOKING_INSERT_LOCK_NAMESPACE = 0x4c44;
 
 /** The unique partial index behind per-user idempotency keys (CLAUDE.md §4). */
 export const IDEMPOTENCY_INDEX = "bookings_user_idempotency_key";
@@ -93,44 +91,12 @@ function single(rows: unknown): Booking {
   return row;
 }
 
-export class BookingRepository {
-  constructor(private readonly db: DbClient) {}
-
-  /**
-   * Inserts a booking. New bookings always start as 'pending' (CLAUDE.md §5).
-   * Must run inside a transaction.
-   *
-   * Overlap is rejected by the `bookings_no_overlap` exclusion constraint,
-   * never by a pre-check. Before inserting we take a transaction-scoped
-   * advisory lock on the resource. It checks nothing; it only orders
-   * concurrent inserts for one resource. Without it, simultaneous inserters
-   * each find the other's uncommitted row, wait on each other, and deadlock
-   * (40P01) — Postgres then breaks one cycle per deadlock_timeout, so a burst
-   * on a popular slot turns into 500s and multi-second stalls. With it, each
-   * later inserter sees the committed winner and fails fast with 23P01.
-   */
-  insert(b: NewBooking): Promise<Booking> {
-    return translatingConstraints(async () => {
-      await this.db.$executeRaw`SELECT pg_advisory_xact_lock(${BOOKING_INSERT_LOCK_NAMESPACE}::int, hashtext(${b.resourceId}))`;
-      return single(
-        await this.db.$queryRaw`
-          WITH inserted AS (
-            INSERT INTO bookings (resource_id, user_id, period, status, purpose, attendee_count, idempotency_key)
-            VALUES (
-              ${b.resourceId}::uuid,
-              ${b.userId}::uuid,
-              ${range(b.startsAt, b.endsAt)},
-              'pending',
-              ${b.purpose},
-              ${b.attendeeCount},
-              ${b.idempotencyKey}
-            )
-            RETURNING *
-          )
-          SELECT ${BOOKING_COLUMNS} FROM inserted b`,
-      );
-    });
-  }
+/**
+ * Read-only booking queries. Safe on any client, so this is what
+ * `uow.read.bookings` exposes.
+ */
+export class BookingReader {
+  constructor(protected readonly db: DbClient) {}
 
   async findById(id: string): Promise<Booking | null> {
     const rows = bookingRows.parse(
@@ -146,26 +112,6 @@ export class BookingRepository {
         WHERE b.user_id = ${userId}::uuid AND b.idempotency_key = ${key}`,
     );
     return rows[0] ?? null;
-  }
-
-  /** Row-locks a booking for the rest of the transaction (before audit snapshots). */
-  async lockById(id: string): Promise<void> {
-    await this.db.$executeRaw`SELECT 1 FROM bookings WHERE id = ${id}::uuid FOR UPDATE`;
-  }
-
-  /** The only status write in the codebase; called solely by transitionBooking. */
-  updateStatus(id: string, status: BookingStatus): Promise<Booking> {
-    return translatingConstraints(async () =>
-      single(
-        await this.db.$queryRaw`
-          WITH updated AS (
-            UPDATE bookings SET status = ${status}::booking_status, updated_at = now()
-            WHERE id = ${id}::uuid
-            RETURNING *
-          )
-          SELECT ${BOOKING_COLUMNS} FROM updated b`,
-      ),
-    );
   }
 
   async list(scope: BookingListScope, filter: BookingListFilter): Promise<Booking[]> {
@@ -210,5 +156,76 @@ export class BookingRepository {
             AND b.period && ${range(from, to)}
           ORDER BY lower(b.period)`,
       );
+  }
+}
+
+/**
+ * Booking writes. Every method here depends on transaction scope (an
+ * xact-scoped advisory lock, FOR UPDATE, or a status change that must commit
+ * with its audit row), so the constructor accepts only a TxClient: building
+ * one from the root client is a compile error, and `uow.read.bookings` is a
+ * BookingReader with no write methods at all.
+ */
+export class BookingWriter extends BookingReader {
+  constructor(private readonly tx: TxClient) {
+    super(tx);
+  }
+
+  /**
+   * Inserts a booking. New bookings always start as 'pending' (CLAUDE.md §5).
+   *
+   * Overlap is rejected by the `bookings_no_overlap` exclusion constraint,
+   * never by a pre-check. Before inserting we take a transaction-scoped
+   * advisory lock on the resource (CLAUDE.md §2c). It checks nothing; it only
+   * orders concurrent inserts for one resource. Without it, simultaneous
+   * inserters each find the other's uncommitted row, wait on each other, and
+   * deadlock (40P01) — Postgres then breaks one cycle per deadlock_timeout, so
+   * a burst on a popular slot turns into 500s and multi-second stalls. With
+   * it, each later inserter sees the committed winner and fails fast with
+   * 23P01. Outside a transaction the lock would be released as soon as the
+   * SELECT finished, which is why this class requires a TxClient.
+   */
+  insert(b: NewBooking): Promise<Booking> {
+    return translatingConstraints(async () => {
+      // Hash collisions are harmless: two resources sharing a key only serialize briefly, never a correctness issue.
+      await this.tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${b.resourceId}::text, 0))`;
+      return single(
+        await this.tx.$queryRaw`
+          WITH inserted AS (
+            INSERT INTO bookings (resource_id, user_id, period, status, purpose, attendee_count, idempotency_key)
+            VALUES (
+              ${b.resourceId}::uuid,
+              ${b.userId}::uuid,
+              ${range(b.startsAt, b.endsAt)},
+              'pending',
+              ${b.purpose},
+              ${b.attendeeCount},
+              ${b.idempotencyKey}
+            )
+            RETURNING *
+          )
+          SELECT ${BOOKING_COLUMNS} FROM inserted b`,
+      );
+    });
+  }
+
+  /** Row-locks a booking for the rest of the transaction (before audit snapshots). */
+  async lockById(id: string): Promise<void> {
+    await this.tx.$executeRaw`SELECT 1 FROM bookings WHERE id = ${id}::uuid FOR UPDATE`;
+  }
+
+  /** The only status write in the codebase; called solely by transitionBooking. */
+  updateStatus(id: string, status: BookingStatus): Promise<Booking> {
+    return translatingConstraints(async () =>
+      single(
+        await this.tx.$queryRaw`
+          WITH updated AS (
+            UPDATE bookings SET status = ${status}::booking_status, updated_at = now()
+            WHERE id = ${id}::uuid
+            RETURNING *
+          )
+          SELECT ${BOOKING_COLUMNS} FROM updated b`,
+      ),
+    );
   }
 }
