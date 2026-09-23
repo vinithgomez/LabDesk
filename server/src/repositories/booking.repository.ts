@@ -4,6 +4,7 @@ import type { TxClient } from "../db/transaction.js";
 import {
   BOOKING_STATUSES,
   SLOT_HOLDING_STATUSES,
+  type ApprovalInboxScope,
   type Booking,
   type BookingListScope,
   type BookingStatus,
@@ -154,6 +155,21 @@ export class BookingReader {
         ${whereSql}
         ORDER BY lower(b.period), b.id
         LIMIT ${filter.limit}`,
+    );
+  }
+
+  /** Pending bookings in an approvals-inbox scope, soonest first. */
+  async listPendingForInbox(scope: ApprovalInboxScope, limit: number): Promise<Booking[]> {
+    const scopeSql =
+      scope.kind === "department"
+        ? Prisma.sql`EXISTS (SELECT 1 FROM resources r WHERE r.id = b.resource_id AND r.department_id = ${scope.departmentId}::uuid)`
+        : Prisma.sql`EXISTS (SELECT 1 FROM resource_owners o WHERE o.resource_id = b.resource_id AND o.user_id = ${scope.userId}::uuid)`;
+    return bookingRows.parse(
+      await this.db.$queryRaw`
+        SELECT ${BOOKING_COLUMNS} FROM bookings b
+        WHERE b.status = 'pending' AND ${scopeSql}
+        ORDER BY lower(b.period), b.id
+        LIMIT ${limit}`,
     );
   }
 

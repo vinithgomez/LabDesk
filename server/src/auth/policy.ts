@@ -4,7 +4,7 @@
  * inspects `actor.role` to make an access decision.
  */
 import { bookingNotFound, DomainError, resourceNotFound } from "../domain/errors.js";
-import type { Actor, BookingListScope, BookingStatus } from "../domain/types.js";
+import type { Actor, ApprovalInboxScope, BookingListScope, BookingStatus } from "../domain/types.js";
 
 /**
  * Subject for `resource:view`. `departmentId: null` means "every department"
@@ -158,6 +158,17 @@ export function defaultResourceScope(actor: Actor): ResourceViewSubject {
 export function bookingListScope(actor: Actor, opts: { mine: boolean }): BookingListScope {
   if (opts.mine) return { kind: "own", userId: actor.id };
   return isAdmin(actor) ? { kind: "all" } : { kind: "ownOrManaged", userId: actor.id };
+}
+
+/**
+ * The approvals inbox: pending bookings on resources the actor owns; an
+ * admin sees every pending booking in their own department. Whether the
+ * actor may decide a given item is still `can(actor, "booking:approve", …)`.
+ */
+export function approvalInboxScope(actor: Actor): ApprovalInboxScope {
+  return isAdmin(actor)
+    ? { kind: "department", departmentId: actor.departmentId }
+    : { kind: "ownedBy", userId: actor.id };
 }
 
 type Denial<A extends Action> = (actor: Actor, subject: PolicySubjects[A]) => DomainError | null;

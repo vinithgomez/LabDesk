@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Actor, UserRole } from "../domain/types.js";
-import { bookingListScope, can, denial } from "./policy.js";
+import { approvalInboxScope, bookingListScope, can, denial } from "./policy.js";
 
 const DEPT_A = "dept-a";
 const DEPT_B = "dept-b";
@@ -185,5 +185,13 @@ describe("policy: booking:approve", () => {
     expect(denial(actor("admin"), "booking:approve", subject({ departmentId: DEPT_B })).code).toBe("WRONG_DEPARTMENT");
     expect(denial(actor("student", { id: "x" }), "booking:approve", subject()).code).toBe("NOT_FOUND");
     expect(denial(actor("student"), "booking:approve", subject()).code).toBe("FORBIDDEN");
+  });
+});
+
+describe("policy: approvalInboxScope", () => {
+  it("scopes admins to their department and everyone else to what they own", () => {
+    expect(approvalInboxScope(actor("admin"))).toEqual({ kind: "department", departmentId: DEPT_A });
+    expect(approvalInboxScope(actor("faculty"))).toEqual({ kind: "ownedBy", userId: "faculty-1" });
+    expect(approvalInboxScope(actor("student"))).toEqual({ kind: "ownedBy", userId: "student-1" });
   });
 });

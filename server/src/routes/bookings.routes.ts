@@ -1,6 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
-import { bookingListScope, can, denial, type ApprovalSubject, type BookingSubject } from "../auth/policy.js";
+import {
+  approvalInboxScope,
+  bookingListScope,
+  can,
+  denial,
+  type ApprovalSubject,
+  type BookingSubject,
+} from "../auth/policy.js";
 import { APPROVAL_DECISIONS, BOOKING_STATUSES } from "../domain/types.js";
 import { actorOf, requireAuth } from "../http/authenticate.js";
 import { isoDateTime, respond } from "../http/respond.js";
@@ -55,6 +62,15 @@ export const listBookingsQuery = z
 // Cancel takes no body; anything sent is rejected like any unknown field.
 export const cancelBookingBody = z.strictObject({}).optional();
 
+export const inboxQuery = z.object({
+  /** true: only items the actor can decide right now. */
+  actionable: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+  limit: z.coerce.number().int().min(1).max(200).default(100),
+});
+
 /** Approve / reject: an optional comment recorded with the decision. */
 export const decisionBody = z.strictObject({ comment: z.string().trim().max(1000).default("") }).optional();
 
@@ -89,7 +105,23 @@ export const bookingWithApprovalsDto = bookingDto.extend({
   awaitingLevel: z.number().nullable(),
 });
 
+/**
+ * An approvals-inbox entry. `stalled`: partially approved and the awaited
+ * level has not acted for 24h. `lapsed`: the start has passed, so the only
+ * remaining decision is reject. `canDecide`: booking:approve for this actor.
+ */
+export const inboxItemDto = bookingWithApprovalsDto.extend({
+  resource: z.object({ id: z.string(), name: z.string() }),
+  awaitingSince: isoDateTime,
+  stalled: z.boolean(),
+  lapsed: z.boolean(),
+  canDecide: z.boolean(),
+});
+export const inboxDto = z.array(inboxItemDto);
+
 export type CreateBookingBody = z.input<typeof createBookingBody>;
+export type InboxQuery = z.input<typeof inboxQuery>;
+export type InboxItemDto = z.output<typeof inboxItemDto>;
 export type ListBookingsQuery = z.input<typeof listBookingsQuery>;
 export type BookingDto = z.output<typeof bookingDto>;
 export type DecisionBody = z.input<typeof decisionBody>;
@@ -170,6 +202,32 @@ export function bookingsRouter(auth: AuthService, bookings: BookingService, reso
     // The scope already restricts the query; every row is still checked.
     const visible = views.filter((v) => can(actor, "booking:view", subjectOf(v)));
     respond(res, 200, bookingListDto, visible.map((v) => toBookingDto(v.booking)));
+  });
+
+  // Registered before "/:id" so "pending" is never parsed as a booking id.
+  router.get("/pending", async (req, res) => {
+    const actor = actorOf(req);
+    const query = inboxQuery.parse(req.query);
+
+    const items = await bookings.inbox(approvalInboxScope(actor), query.limit);
+    const shown = items
+      .filter((item) => can(actor, "booking:view", subjectOf(item)))
+      .map((item) => ({ item, canDecide: can(actor, "booking:approve", approvalSubjectOf(item)) }))
+      .filter(({ canDecide }) => !query.actionable || canDecide);
+
+    respond(
+      res,
+      200,
+      inboxDto,
+      shown.map(({ item, canDecide }) => ({
+        ...withApprovals(item),
+        resource: { id: item.resource.id, name: item.resource.name },
+        awaitingSince: item.awaitingSince,
+        stalled: item.stalled,
+        lapsed: item.lapsed,
+        canDecide,
+      })),
+    );
   });
 
   router.get("/:id", async (req, res) => {

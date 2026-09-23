@@ -89,6 +89,14 @@ export type BookingListScope =
   /** The user's own bookings plus bookings on resources they own. */
   | { kind: "ownOrManaged"; userId: string };
 
+/**
+ * Which pending bookings an approvals inbox shows. Computed only by the
+ * policy module (`approvalInboxScope`).
+ */
+export type ApprovalInboxScope =
+  | { kind: "department"; departmentId: string }
+  | { kind: "ownedBy"; userId: string };
+
 /** `period` is the half-open range [startsAt, endsAt), stored as tstzrange in UTC. */
 export interface Booking {
   id: string;

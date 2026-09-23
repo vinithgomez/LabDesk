@@ -1,8 +1,16 @@
-import { approvalProgress, type ApprovalProgress } from "../domain/approvals.js";
+import { approvalProgress, isStalled, type ApprovalProgress } from "../domain/approvals.js";
 import type { AuditAction } from "../domain/audit.js";
 import { assertBookableSlot } from "../domain/booking-rules.js";
 import { bookingNotFound, DomainError, resourceNotFound } from "../domain/errors.js";
-import type { Actor, Booking, BookingApproval, BookingListScope, BookingStatus, Resource } from "../domain/types.js";
+import type {
+  Actor,
+  ApprovalInboxScope,
+  Booking,
+  BookingApproval,
+  BookingListScope,
+  BookingStatus,
+  Resource,
+} from "../domain/types.js";
 import type { BookingListFilter, HeldSlot } from "../repositories/booking.repository.js";
 import { IDEMPOTENCY_INDEX } from "../repositories/booking.repository.js";
 import { ConstraintViolation } from "../repositories/constraint-violation.js";
@@ -36,6 +44,19 @@ export interface BookingView {
 export interface ApprovalState extends BookingView {
   approvals: BookingApproval[];
   progress: ApprovalProgress;
+}
+
+/**
+ * An approvals-inbox entry. `stalled` and `lapsed` are computed on read, so
+ * neither needs a background job (see src/domain/approvals.ts).
+ */
+export interface InboxItem extends ApprovalState {
+  /** When the awaited level started waiting: the last decision, or creation. */
+  awaitingSince: Date;
+  /** Partially approved and the next level has waited >= STALL_AFTER_MS. */
+  stalled: boolean;
+  /** The booking's start has passed: it can only be rejected now. */
+  lapsed: boolean;
 }
 
 export interface DecisionInput {
@@ -166,6 +187,41 @@ export class BookingService {
     const view = await this.get(id);
     const approvals = await this.uow.read.approvals.listForBooking(id);
     return { ...view, approvals, progress: approvalProgress(view.resource, approvals) };
+  }
+
+  /** `scope` must come from the policy module (`approvalInboxScope`). */
+  async inbox(scope: ApprovalInboxScope, limit: number): Promise<InboxItem[]> {
+    const bookings = await this.uow.read.bookings.listPendingForInbox(scope, limit);
+    const ids = bookings.map((b) => b.id);
+    const [resources, approvals] = await Promise.all([
+      this.uow.read.resources.findManyByIds([...new Set(bookings.map((b) => b.resourceId))]),
+      this.uow.read.approvals.listForBookings(ids),
+    ]);
+    const resourceById = new Map(resources.map((r) => [r.id, r]));
+    const now = this.now();
+
+    return bookings.flatMap((booking) => {
+      const resource = resourceById.get(booking.resourceId);
+      if (!resource) return [];
+      const own = approvals.filter((a) => a.bookingId === booking.id);
+      const progress = approvalProgress(resource, own);
+      const lastDecision = own.reduce<Date | null>(
+        (latest, a) => (latest === null || a.decidedAt > latest ? a.decidedAt : latest),
+        null,
+      );
+      const awaitingSince = lastDecision ?? booking.createdAt;
+      return [
+        {
+          booking,
+          resource,
+          approvals: own,
+          progress,
+          awaitingSince,
+          stalled: isStalled(progress, awaitingSince, now),
+          lapsed: booking.startsAt.getTime() <= now.getTime(),
+        },
+      ];
+    });
   }
 
   /** `scope` must come from the policy module (`bookingListScope`). */
