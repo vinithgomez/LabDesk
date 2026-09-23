@@ -60,13 +60,22 @@ export function can<A extends Action>(actor: Actor, action: A, subject: PolicySu
 }
 
 /**
+ * The department scope a listing uses when the caller didn't ask for one:
+ * admins default to every department (null), everyone else to their own.
+ * The chosen scope is still passed through `can(actor, "resource:view", ...)`.
+ */
+export function defaultResourceScope(actor: Actor): ResourceViewSubject {
+  return { departmentId: isAdmin(actor) ? null : actor.departmentId };
+}
+
+/**
  * The error to raise after `can()` returned false. Cross-department denials
  * get WRONG_DEPARTMENT so clients can tell scoping apart from missing rights.
  */
 export function denial<A extends Action>(actor: Actor, action: A, subject: PolicySubjects[A]): DomainError {
   const departmentId = "departmentId" in subject ? subject.departmentId : undefined;
   if (typeof departmentId === "string" && departmentId !== actor.departmentId && !isAdmin(actor)) {
-    return new DomainError("WRONG_DEPARTMENT", "This resource belongs to another department");
+    return new DomainError("WRONG_DEPARTMENT", "You can only access resources in your own department");
   }
   return new DomainError("FORBIDDEN", `You are not allowed to perform ${action}`);
 }
