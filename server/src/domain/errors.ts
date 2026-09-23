@@ -18,7 +18,15 @@ export type DomainErrorCode =
   /** Reserved for a later phase: visible resource, action not permitted. Not returned by any current route. */
   | "WRONG_DEPARTMENT"
   | "NOT_FOUND"
-  | "SLOT_CONFLICT";
+  | "SLOT_CONFLICT"
+  | "MAINTENANCE_BLOCKED"
+  | "MULTI_DAY_NOT_SUPPORTED"
+  | "SLOT_TOO_LONG"
+  | "SLOT_TOO_SHORT"
+  | "OUTSIDE_HORIZON"
+  | "CAPACITY_EXCEEDED"
+  | "IDEMPOTENCY_KEY_REUSED"
+  | "INVALID_TRANSITION";
 
 export class DomainError extends Error {
   constructor(
@@ -38,4 +46,9 @@ export class DomainError extends Error {
  */
 export function resourceNotFound(): DomainError {
   return new DomainError("NOT_FOUND", "Resource not found");
+}
+
+/** Same rule for bookings: missing and not-visible-to-you look identical. */
+export function bookingNotFound(): DomainError {
+  return new DomainError("NOT_FOUND", "Booking not found");
 }

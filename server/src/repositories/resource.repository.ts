@@ -58,6 +58,12 @@ export class ResourceRepository {
     return row ? toResource(row) : null;
   }
 
+  async findManyByIds(ids: readonly string[]): Promise<Resource[]> {
+    if (ids.length === 0) return [];
+    const rows = await this.db.resource.findMany({ where: { id: { in: [...ids] } }, select: resourceSelect });
+    return rows.map(toResource);
+  }
+
   async list(filter: ResourceFilter): Promise<Resource[]> {
     const q = filter.q?.trim();
     const rows = await this.db.resource.findMany({

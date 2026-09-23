@@ -4,13 +4,15 @@
  * only available inside a unit-of-work transaction.
  */
 
-export type AuditEntityType = "user" | "resource";
+export type AuditEntityType = "user" | "resource" | "booking";
 
 export type AuditAction =
   | "user.role_changed"
   | "resource.created"
   | "resource.updated"
-  | "resource.deactivated";
+  | "resource.deactivated"
+  | "booking.created"
+  | "booking.cancelled";
 
 export interface AuditEntry {
   /** null is reserved for system actors (scheduled jobs in later phases). */

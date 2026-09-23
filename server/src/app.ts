@@ -39,7 +39,7 @@ export function createApp({ config, services, logger }: AppDeps): Express {
   app.use("/api/auth", authRouter(services.auth, cookie));
   app.use("/api/departments", departmentsRouter(services.departments));
   app.use("/api/users", usersRouter(services.auth, services.users));
-  app.use("/api/resources", resourcesRouter(services.auth, services.resources));
+  app.use("/api/resources", resourcesRouter(services.auth, services.resources, services.bookings));
   app.use("/api/bookings", bookingsRouter(services.auth, services.bookings, services.resources));
 
   app.use(notFoundHandler);

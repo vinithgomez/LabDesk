@@ -3,8 +3,8 @@
  * `can()` before invoking a mutating service; nothing else in the codebase
  * inspects `actor.role` to make an access decision.
  */
-import { DomainError, resourceNotFound } from "../domain/errors.js";
-import type { Actor } from "../domain/types.js";
+import { bookingNotFound, DomainError, resourceNotFound } from "../domain/errors.js";
+import type { Actor, BookingListScope, BookingStatus } from "../domain/types.js";
 
 /**
  * Subject for `resource:view`. `departmentId: null` means "every department"
@@ -34,11 +34,21 @@ export interface BookingCreateSubject {
   isActive: boolean;
 }
 
+/** Subject for `booking:view` / `booking:cancel`: a booking and its resource. */
+export interface BookingSubject {
+  id: string;
+  userId: string;
+  status: BookingStatus;
+  resource: { id: string; departmentId: string; ownerIds: readonly string[] };
+}
+
 export interface PolicySubjects {
   "resource:view": ResourceViewSubject;
   "resource:manage": ResourceManageSubject;
   "user:change_role": RoleChangeSubject;
   "booking:create": BookingCreateSubject;
+  "booking:view": BookingSubject;
+  "booking:cancel": BookingSubject;
 }
 
 export type Action = keyof PolicySubjects;
@@ -50,6 +60,13 @@ const isAdmin = (actor: Actor): boolean => actor.role === "admin";
 /** Department scoping (§2b): same department only; admins see all. */
 const canSeeDepartment = (actor: Actor, departmentId: string | null): boolean =>
   isAdmin(actor) || (departmentId !== null && departmentId === actor.departmentId);
+
+/** Resource owner, pinned to the actor's own department (as for resource:manage). */
+const ownsResource = (actor: Actor, r: { departmentId: string; ownerIds: readonly string[] }): boolean =>
+  r.departmentId === actor.departmentId && r.ownerIds.includes(actor.id);
+
+/** Once the user is in the room, only staff can end the booking early (§5, §6). */
+const BOOKER_CANNOT_CANCEL: readonly BookingStatus[] = ["checked_in", "completed"];
 
 const rules: { [A in Action]: Rule<A> } = {
   "resource:view": (actor, s) => canSeeDepartment(actor, s.departmentId),
@@ -67,6 +84,17 @@ const rules: { [A in Action]: Rule<A> } = {
   // department (§6). This applies to admins too: seeing every department is
   // not the same as booking in every department.
   "booking:create": (actor, r) => r.isActive && r.departmentId === actor.departmentId,
+
+  // The booker, the resource's owners (who approve and manage it) and admins.
+  "booking:view": (actor, b) => isAdmin(actor) || b.userId === actor.id || ownsResource(actor, b.resource),
+
+  // §6: owner of booking (if not checked in) OR resource owner OR admin.
+  // Whether the booking is still cancellable at all is the state machine's
+  // call (transitionBooking), not the policy's.
+  "booking:cancel": (actor, b) =>
+    isAdmin(actor) ||
+    ownsResource(actor, b.resource) ||
+    (b.userId === actor.id && !BOOKER_CANNOT_CANCEL.includes(b.status)),
 };
 
 export function can<A extends Action>(actor: Actor, action: A, subject: PolicySubjects[A]): boolean {
@@ -82,6 +110,15 @@ export function can<A extends Action>(actor: Actor, action: A, subject: PolicySu
  */
 export function defaultResourceScope(actor: Actor): ResourceViewSubject {
   return { departmentId: isAdmin(actor) ? null : actor.departmentId };
+}
+
+/**
+ * The bookings a listing may return (the list-level form of booking:view).
+ * `mine` narrows to the actor's own bookings for everyone.
+ */
+export function bookingListScope(actor: Actor, opts: { mine: boolean }): BookingListScope {
+  if (opts.mine) return { kind: "own", userId: actor.id };
+  return isAdmin(actor) ? { kind: "all" } : { kind: "ownOrManaged", userId: actor.id };
 }
 
 type Denial<A extends Action> = (actor: Actor, subject: PolicySubjects[A]) => DomainError | null;
@@ -108,6 +145,9 @@ const denials: { [A in Action]?: Denial<A> } = {
     if (!r.isActive) return new DomainError("FORBIDDEN", "This resource is not accepting bookings");
     return null;
   },
+  // A booking you may not see is indistinguishable from one that doesn't exist.
+  "booking:view": () => bookingNotFound(),
+  "booking:cancel": (actor, b) => (can(actor, "booking:view", b) ? null : bookingNotFound()),
 };
 
 /** The error to raise after `can()` returned false. */

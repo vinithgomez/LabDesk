@@ -71,6 +71,16 @@ export type BookingStatus = (typeof BOOKING_STATUSES)[number];
 /** Statuses that hold a slot (they participate in the overlap constraint). */
 export const SLOT_HOLDING_STATUSES = ["pending", "approved", "checked_in"] as const satisfies readonly BookingStatus[];
 
+/**
+ * Which bookings a listing may return. Computed only by the policy module
+ * (`bookingListScope`).
+ */
+export type BookingListScope =
+  | { kind: "all" }
+  | { kind: "own"; userId: string }
+  /** The user's own bookings plus bookings on resources they own. */
+  | { kind: "ownOrManaged"; userId: string };
+
 /** `period` is the half-open range [startsAt, endsAt), stored as tstzrange in UTC. */
 export interface Booking {
   id: string;

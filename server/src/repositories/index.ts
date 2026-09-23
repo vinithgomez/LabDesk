@@ -3,6 +3,7 @@ import type { AuditEntry } from "../domain/audit.js";
 import { AuditRepository } from "./audit.repository.js";
 import { BookingRepository } from "./booking.repository.js";
 import { DepartmentRepository } from "./department.repository.js";
+import { MaintenanceRepository } from "./maintenance.repository.js";
 import { RefreshTokenRepository } from "./refresh-token.repository.js";
 import { ResourceRepository } from "./resource.repository.js";
 import { UserRepository } from "./user.repository.js";
@@ -13,6 +14,7 @@ export interface Repositories {
   refreshTokens: RefreshTokenRepository;
   resources: ResourceRepository;
   bookings: BookingRepository;
+  maintenance: MaintenanceRepository;
 }
 
 /**
@@ -32,6 +34,7 @@ export function createRepositories(db: DbClient): Repositories {
     refreshTokens: new RefreshTokenRepository(db),
     resources: new ResourceRepository(db),
     bookings: new BookingRepository(db),
+    maintenance: new MaintenanceRepository(db),
   };
 }
 

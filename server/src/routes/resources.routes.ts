@@ -1,11 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
 import { can, defaultResourceScope, denial } from "../auth/policy.js";
-import { RESOURCE_TYPES } from "../domain/types.js";
+import { BOOKING_STATUSES, RESOURCE_TYPES } from "../domain/types.js";
 import { actorOf, requireAuth } from "../http/authenticate.js";
 import { isoDateTime, respond } from "../http/respond.js";
 import type { AuthService } from "../services/auth.service.js";
+import type { BookingService } from "../services/booking.service.js";
 import type { ResourceService } from "../services/resource.service.js";
+import { instant } from "./bookings.routes.js";
 import { idParams } from "./schemas.js";
 
 // ---- Request schemas ------------------------------------------------------
@@ -59,6 +61,16 @@ export const listResourcesQuery = z.object({
   active: z.enum(["true", "false"]).transform((v) => v === "true").optional(),
 });
 
+const MAX_AVAILABILITY_WINDOW_MS = 31 * 86_400_000;
+
+export const availabilityQuery = z
+  .object({ from: instant, to: instant })
+  .refine((q) => q.to.getTime() > q.from.getTime(), { message: "to must be after from", path: ["to"] })
+  .refine((q) => q.to.getTime() - q.from.getTime() <= MAX_AVAILABILITY_WINDOW_MS, {
+    message: "The window may span at most 31 days",
+    path: ["to"],
+  });
+
 // ---- Response schemas -----------------------------------------------------
 
 export const resourceDto = z.object({
@@ -81,14 +93,32 @@ export const resourceDto = z.object({
 });
 export const resourceListDto = z.array(resourceDto);
 
+/**
+ * Busy intervals only — no booker identity is exposed. Bookings carry their
+ * status so a calendar can shade pending (tentative) holds differently.
+ */
+export const availabilityDto = z.object({
+  resourceId: z.string(),
+  from: isoDateTime,
+  to: isoDateTime,
+  busy: z.array(
+    z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("booking"), start: isoDateTime, end: isoDateTime, status: z.enum(BOOKING_STATUSES) }),
+      z.object({ kind: z.literal("maintenance"), start: isoDateTime, end: isoDateTime }),
+    ]),
+  ),
+});
+
 export type CreateResourceBody = z.input<typeof createResourceBody>;
+export type AvailabilityQuery = z.input<typeof availabilityQuery>;
+export type AvailabilityDto = z.output<typeof availabilityDto>;
 export type UpdateResourceBody = z.input<typeof updateResourceBody>;
 export type ListResourcesQuery = z.input<typeof listResourcesQuery>;
 export type ResourceDto = z.output<typeof resourceDto>;
 
 // ---- Router ---------------------------------------------------------------
 
-export function resourcesRouter(auth: AuthService, resources: ResourceService): Router {
+export function resourcesRouter(auth: AuthService, resources: ResourceService, bookings: BookingService): Router {
   const router = Router();
   router.use(requireAuth(auth));
 
@@ -116,6 +146,22 @@ export function resourcesRouter(auth: AuthService, resources: ResourceService): 
     if (!can(actor, "resource:view", resource)) throw denial(actor, "resource:view", resource);
 
     respond(res, 200, resourceDto, resource);
+  });
+
+  router.get("/:id/availability", async (req, res) => {
+    const actor = actorOf(req);
+    const { id } = idParams.parse(req.params);
+    const { from, to } = availabilityQuery.parse(req.query);
+
+    const resource = await resources.get(id);
+    if (!can(actor, "resource:view", resource)) throw denial(actor, "resource:view", resource);
+
+    const { held, maintenance } = await bookings.availability(resource.id, from, to);
+    const busy = [
+      ...held.map((b) => ({ kind: "booking" as const, start: b.startsAt, end: b.endsAt, status: b.status })),
+      ...maintenance.map((m) => ({ kind: "maintenance" as const, start: m.startsAt, end: m.endsAt })),
+    ].sort((a, b) => a.start.getTime() - b.start.getTime());
+    respond(res, 200, availabilityDto, { resourceId: resource.id, from, to, busy });
   });
 
   router.post("/", async (req, res) => {

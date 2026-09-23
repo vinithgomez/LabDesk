@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { constraintViolationOf, Prisma, type DbClient } from "../db/prisma.js";
-import { BOOKING_STATUSES, type Booking } from "../domain/types.js";
+import {
+  BOOKING_STATUSES,
+  SLOT_HOLDING_STATUSES,
+  type Booking,
+  type BookingListScope,
+  type BookingStatus,
+} from "../domain/types.js";
 import { ConstraintViolation } from "./constraint-violation.js";
 
 /**
@@ -39,6 +45,12 @@ const BOOKING_COLUMNS = Prisma.sql`
 /** Advisory-lock namespace (first key) for per-resource booking inserts ("LD"). */
 const BOOKING_INSERT_LOCK_NAMESPACE = 0x4c44;
 
+/** The unique partial index behind per-user idempotency keys (CLAUDE.md §4). */
+export const IDEMPOTENCY_INDEX = "bookings_user_idempotency_key";
+
+const range = (from: Date, to: Date): Prisma.Sql =>
+  Prisma.sql`tstzrange(${from.toISOString()}::timestamptz, ${to.toISOString()}::timestamptz, '[)')`;
+
 export interface NewBooking {
   resourceId: string;
   userId: string;
@@ -47,6 +59,21 @@ export interface NewBooking {
   purpose: string;
   attendeeCount: number;
   idempotencyKey: string | null;
+}
+
+export interface BookingListFilter {
+  statuses?: readonly BookingStatus[] | undefined;
+  resourceId?: string | undefined;
+  /** Bookings whose period overlaps [from, to). Either bound may be open. */
+  from?: Date | undefined;
+  to?: Date | undefined;
+  limit: number;
+}
+
+export interface HeldSlot {
+  startsAt: Date;
+  endsAt: Date;
+  status: BookingStatus;
 }
 
 /** Runs a write, translating constraint failures into ConstraintViolation. */
@@ -92,7 +119,7 @@ export class BookingRepository {
             VALUES (
               ${b.resourceId}::uuid,
               ${b.userId}::uuid,
-              tstzrange(${b.startsAt.toISOString()}::timestamptz, ${b.endsAt.toISOString()}::timestamptz, '[)'),
+              ${range(b.startsAt, b.endsAt)},
               'pending',
               ${b.purpose},
               ${b.attendeeCount},
@@ -110,5 +137,78 @@ export class BookingRepository {
       await this.db.$queryRaw`SELECT ${BOOKING_COLUMNS} FROM bookings b WHERE b.id = ${id}::uuid`,
     );
     return rows[0] ?? null;
+  }
+
+  async findByIdempotencyKey(userId: string, key: string): Promise<Booking | null> {
+    const rows = bookingRows.parse(
+      await this.db.$queryRaw`
+        SELECT ${BOOKING_COLUMNS} FROM bookings b
+        WHERE b.user_id = ${userId}::uuid AND b.idempotency_key = ${key}`,
+    );
+    return rows[0] ?? null;
+  }
+
+  /** Row-locks a booking for the rest of the transaction (before audit snapshots). */
+  async lockById(id: string): Promise<void> {
+    await this.db.$executeRaw`SELECT 1 FROM bookings WHERE id = ${id}::uuid FOR UPDATE`;
+  }
+
+  /** The only status write in the codebase; called solely by transitionBooking. */
+  updateStatus(id: string, status: BookingStatus): Promise<Booking> {
+    return translatingConstraints(async () =>
+      single(
+        await this.db.$queryRaw`
+          WITH updated AS (
+            UPDATE bookings SET status = ${status}::booking_status, updated_at = now()
+            WHERE id = ${id}::uuid
+            RETURNING *
+          )
+          SELECT ${BOOKING_COLUMNS} FROM updated b`,
+      ),
+    );
+  }
+
+  async list(scope: BookingListScope, filter: BookingListFilter): Promise<Booking[]> {
+    const where: Prisma.Sql[] = [];
+    if (scope.kind === "own") where.push(Prisma.sql`b.user_id = ${scope.userId}::uuid`);
+    if (scope.kind === "ownOrManaged") {
+      where.push(Prisma.sql`(
+        b.user_id = ${scope.userId}::uuid
+        OR EXISTS (SELECT 1 FROM resource_owners o WHERE o.resource_id = b.resource_id AND o.user_id = ${scope.userId}::uuid)
+      )`);
+    }
+    if (filter.statuses && filter.statuses.length > 0) {
+      where.push(Prisma.sql`b.status::text IN (${Prisma.join([...filter.statuses])})`);
+    }
+    if (filter.resourceId) where.push(Prisma.sql`b.resource_id = ${filter.resourceId}::uuid`);
+    if (filter.from || filter.to) {
+      where.push(Prisma.sql`b.period && tstzrange(
+        ${filter.from?.toISOString() ?? null}::timestamptz,
+        ${filter.to?.toISOString() ?? null}::timestamptz, '[)')`);
+    }
+    const whereSql = where.length > 0 ? Prisma.sql`WHERE ${Prisma.join(where, " AND ")}` : Prisma.empty;
+
+    return bookingRows.parse(
+      await this.db.$queryRaw`
+        SELECT ${BOOKING_COLUMNS} FROM bookings b
+        ${whereSql}
+        ORDER BY lower(b.period), b.id
+        LIMIT ${filter.limit}`,
+    );
+  }
+
+  /** Slot-holding bookings (pending/approved/checked_in) overlapping [from, to). */
+  async heldSlots(resourceId: string, from: Date, to: Date): Promise<HeldSlot[]> {
+    return z
+      .array(z.object({ startsAt: z.date(), endsAt: z.date(), status: z.enum(BOOKING_STATUSES) }))
+      .parse(
+        await this.db.$queryRaw`
+          SELECT lower(b.period) AS "startsAt", upper(b.period) AS "endsAt", b.status::text AS "status"
+          FROM bookings b
+          WHERE b.resource_id = ${resourceId}::uuid
+            AND b.status::text IN (${Prisma.join([...SLOT_HOLDING_STATUSES])})
+            AND b.period && ${range(from, to)}
+          ORDER BY lower(b.period)`,
+      );
   }
 }

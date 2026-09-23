@@ -9,6 +9,12 @@ export const isoDateTime = z.date().transform((d) => d.toISOString());
  * both documents the contract and strips anything not declared in it
  * (password hashes, QR secrets) as defence in depth.
  */
-export function respond<S extends z.ZodType>(res: Response, status: number, schema: S, data: z.input<S>): void {
-  res.status(status).json({ data: schema.parse(data) });
+export function respond<S extends z.ZodType>(
+  res: Response,
+  status: number,
+  schema: S,
+  data: z.input<S>,
+  meta?: Record<string, string>,
+): void {
+  res.status(status).json(meta ? { data: schema.parse(data), meta } : { data: schema.parse(data) });
 }

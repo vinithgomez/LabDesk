@@ -53,45 +53,47 @@ model Department {
 }
 
 model User {
-  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email          String          @unique @db.Citext
-  passwordHash   String          @map("password_hash")
-  fullName       String          @map("full_name")
-  role           UserRole        @default(student)
-  departmentId   String          @map("department_id") @db.Uuid
-  rollNo         String?         @map("roll_no")
-  isActive       Boolean         @default(true) @map("is_active")
-  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  department     Department      @relation(fields: [departmentId], references: [id], onDelete: Restrict)
-  ownedResources ResourceOwner[]
-  refreshTokens  RefreshToken[]
-  auditEntries   AuditLog[]
-  bookings       Booking[]
+  id                        String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                     String              @unique @db.Citext
+  passwordHash              String              @map("password_hash")
+  fullName                  String              @map("full_name")
+  role                      UserRole            @default(student)
+  departmentId              String              @map("department_id") @db.Uuid
+  rollNo                    String?             @map("roll_no")
+  isActive                  Boolean             @default(true) @map("is_active")
+  createdAt                 DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  department                Department          @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  ownedResources            ResourceOwner[]
+  refreshTokens             RefreshToken[]
+  auditEntries              AuditLog[]
+  bookings                  Booking[]
+  maintenanceWindowsCreated MaintenanceWindow[]
 
   @@index([departmentId])
   @@map("users")
 }
 
 model Resource {
-  id                 String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  departmentId       String          @map("department_id") @db.Uuid
+  id                 String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  departmentId       String              @map("department_id") @db.Uuid
   name               String
   type               ResourceType
   location           String
   capacity           Int
-  description        String          @default("")
-  qrSecret           String          @default(dbgenerated("encode(gen_random_bytes(32), 'hex')")) @map("qr_secret")
-  requiresApproval   Boolean         @default(false) @map("requires_approval")
-  approvalLevels     Int             @default(1) @map("approval_levels") @db.SmallInt
-  minSlotMinutes     Int             @default(30) @map("min_slot_minutes")
-  maxSlotMinutes     Int             @default(180) @map("max_slot_minutes")
-  bookingHorizonDays Int             @default(14) @map("booking_horizon_days")
-  isActive           Boolean         @default(true) @map("is_active")
-  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  department         Department      @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  description        String              @default("")
+  qrSecret           String              @default(dbgenerated("encode(gen_random_bytes(32), 'hex')")) @map("qr_secret")
+  requiresApproval   Boolean             @default(false) @map("requires_approval")
+  approvalLevels     Int                 @default(1) @map("approval_levels") @db.SmallInt
+  minSlotMinutes     Int                 @default(30) @map("min_slot_minutes")
+  maxSlotMinutes     Int                 @default(180) @map("max_slot_minutes")
+  bookingHorizonDays Int                 @default(14) @map("booking_horizon_days")
+  isActive           Boolean             @default(true) @map("is_active")
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  department         Department          @relation(fields: [departmentId], references: [id], onDelete: Restrict)
   owners             ResourceOwner[]
   bookings           Booking[]
+  maintenanceWindows MaintenanceWindow[]
 
   @@index([departmentId])
   @@map("resources")
@@ -169,4 +171,22 @@ model Booking {
   @@index([resourceId])
   @@index([userId])
   @@map("bookings")
+}
+
+// Blocks bookings for a resource during [start, end). Windows for one
+// resource may not overlap each other (exclusion constraint in the
+// migration). The booking service rejects bookings that overlap a window
+// with MAINTENANCE_BLOCKED. Endpoints for managing windows are Phase 7.
+model MaintenanceWindow {
+  id         String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  resourceId String                   @map("resource_id") @db.Uuid
+  period     Unsupported("tstzrange")
+  reason     String                   @default("")
+  createdBy  String                   @map("created_by") @db.Uuid
+  createdAt  DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  resource   Resource                 @relation(fields: [resourceId], references: [id], onDelete: Restrict)
+  creator    User                     @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+
+  @@index([createdBy])
+  @@map("maintenance_windows")
 }
