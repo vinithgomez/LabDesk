@@ -26,7 +26,8 @@ export type DomainErrorCode =
   | "OUTSIDE_HORIZON"
   | "CAPACITY_EXCEEDED"
   | "IDEMPOTENCY_KEY_REUSED"
-  | "INVALID_TRANSITION";
+  | "INVALID_TRANSITION"
+  | "OWNER_REQUIRED";
 
 export class DomainError extends Error {
   constructor(

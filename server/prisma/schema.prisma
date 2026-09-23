@@ -34,6 +34,13 @@ enum BookingStatus {
   @@map("booking_status")
 }
 
+enum ApprovalDecision {
+  approved
+  rejected
+
+  @@map("approval_decision")
+}
+
 enum ResourceType {
   lab
   room
@@ -67,6 +74,7 @@ model User {
   refreshTokens             RefreshToken[]
   auditEntries              AuditLog[]
   bookings                  Booking[]
+  approvalsGiven            BookingApproval[]
   maintenanceWindowsCreated MaintenanceWindow[]
 
   @@index([departmentId])
@@ -99,11 +107,15 @@ model Resource {
   @@map("resources")
 }
 
+// An owner approves bookings at exactly one level (1 or 2). For a resource
+// that requires approval, every level up to approval_levels must keep at
+// least one owner (enforced by ResourceService).
 model ResourceOwner {
-  resourceId String   @map("resource_id") @db.Uuid
-  userId     String   @map("user_id") @db.Uuid
-  resource   Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resourceId    String   @map("resource_id") @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  approvalLevel Int      @default(1) @map("approval_level") @db.SmallInt
+  resource      Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([resourceId, userId])
   @@index([userId])
@@ -167,6 +179,7 @@ model Booking {
   updatedAt      DateTime                 @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   resource       Resource                 @relation(fields: [resourceId], references: [id], onDelete: Restrict)
   user           User                     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  approvals      BookingApproval[]
 
   @@index([resourceId])
   @@index([userId])
@@ -189,4 +202,24 @@ model MaintenanceWindow {
 
   @@index([createdBy])
   @@map("maintenance_windows")
+}
+
+// One row per approval decision (CLAUDE.md §4). Written only by
+// transitionBooking. A booking gets at most one decision per level and at
+// most one decision per approver, so one person can never satisfy both levels.
+model BookingApproval {
+  id         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  bookingId  String           @map("booking_id") @db.Uuid
+  level      Int              @db.SmallInt
+  approverId String           @map("approver_id") @db.Uuid
+  decision   ApprovalDecision
+  comment    String           @default("")
+  decidedAt  DateTime         @default(now()) @map("decided_at") @db.Timestamptz(6)
+  booking    Booking          @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  approver   User             @relation(fields: [approverId], references: [id], onDelete: Restrict)
+
+  @@unique([bookingId, level])
+  @@unique([bookingId, approverId])
+  @@index([approverId])
+  @@map("booking_approvals")
 }

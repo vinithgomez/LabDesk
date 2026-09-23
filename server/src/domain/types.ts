@@ -38,6 +38,12 @@ export interface UserCredentials extends User {
   passwordHash: string;
 }
 
+/** A resource owner and the approval level they decide at. */
+export interface ResourceOwner {
+  userId: string;
+  approvalLevel: number;
+}
+
 export interface Resource {
   id: string;
   departmentId: string;
@@ -52,7 +58,9 @@ export interface Resource {
   maxSlotMinutes: number;
   bookingHorizonDays: number;
   isActive: boolean;
+  /** Derived from `owners`; what most authorization checks need. */
   ownerIds: string[];
+  owners: ResourceOwner[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -95,3 +103,18 @@ export interface Booking {
   createdAt: Date;
   updatedAt: Date;
 }
+
+export const APPROVAL_DECISIONS = ["approved", "rejected"] as const;
+export type ApprovalDecision = (typeof APPROVAL_DECISIONS)[number];
+
+/** One approval decision on a booking (CLAUDE.md §4 booking_approvals). */
+export interface BookingApproval {
+  id: string;
+  bookingId: string;
+  level: number;
+  approverId: string;
+  decision: ApprovalDecision;
+  comment: string;
+  decidedAt: Date;
+}
+

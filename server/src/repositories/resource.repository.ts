@@ -1,6 +1,6 @@
-import type { DbClient } from "../db/prisma.js";
+import type { DbClient, Prisma } from "../db/prisma.js";
 import type { TxClient } from "../db/transaction.js";
-import type { Resource, ResourceType } from "../domain/types.js";
+import type { Resource, ResourceOwner, ResourceType } from "../domain/types.js";
 
 // qr_secret is intentionally never selected here; only the (Phase 4) QR
 // service will read it, through a dedicated method.
@@ -20,13 +20,13 @@ const resourceSelect = {
   isActive: true,
   createdAt: true,
   updatedAt: true,
-  owners: { select: { userId: true } },
-} as const;
+  owners: { select: { userId: true, approvalLevel: true }, orderBy: [{ approvalLevel: "asc" }, { userId: "asc" }] },
+} satisfies Prisma.ResourceSelect;
 
-type ResourceRow = Omit<Resource, "ownerIds"> & { owners: { userId: string }[] };
+type ResourceRow = Omit<Resource, "ownerIds">;
 
-function toResource({ owners, ...row }: ResourceRow): Resource {
-  return { ...row, ownerIds: owners.map((o) => o.userId) };
+function toResource(row: ResourceRow): Resource {
+  return { ...row, ownerIds: row.owners.map((o) => o.userId) };
 }
 
 export interface ResourceFields {
@@ -99,12 +99,12 @@ export class ResourceWriter extends ResourceReader {
     super(tx);
   }
 
-  async create(departmentId: string, fields: ResourceFields, ownerIds: string[]): Promise<Resource> {
+  async create(departmentId: string, fields: ResourceFields, owners: readonly ResourceOwner[]): Promise<Resource> {
     const row = await this.tx.resource.create({
       data: {
         ...fields,
         departmentId,
-        owners: { create: ownerIds.map((userId) => ({ userId })) },
+        owners: { create: owners.map((o) => ({ userId: o.userId, approvalLevel: o.approvalLevel })) },
       },
       select: resourceSelect,
     });
@@ -127,6 +127,20 @@ export class ResourceWriter extends ResourceReader {
    */
   async lockForShare(id: string): Promise<void> {
     await this.tx.$executeRaw`SELECT 1 FROM "resources" WHERE "id" = ${id}::uuid FOR SHARE`;
+  }
+
+/**
+   * Replaces the owner set. resource_owners rows are not referenced by
+   * bookings or approvals (those point at users), so replacing them loses no
+   * history; the change itself is recorded in the audit log by the caller.
+   */
+  async replaceOwners(resourceId: string, owners: readonly ResourceOwner[]): Promise<Resource> {
+    await this.tx.resourceOwner.deleteMany({ where: { resourceId } });
+    await this.tx.resourceOwner.createMany({
+      data: owners.map((o) => ({ resourceId, userId: o.userId, approvalLevel: o.approvalLevel })),
+    });
+    const row = await this.tx.resource.findUniqueOrThrow({ where: { id: resourceId }, select: resourceSelect });
+    return toResource(row);
   }
 
   async update(id: string, patch: Partial<ResourceFields>): Promise<Resource> {

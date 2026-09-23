@@ -34,7 +34,11 @@ export class ResourceService {
       if (!department) throw new DomainError("DEPARTMENT_NOT_FOUND", "Department does not exist");
       await assertEligibleOwners(tx, ownerIds, department.id);
 
-      const created = await tx.resources.create(department.id, input.fields, ownerIds);
+      const created = await tx.resources.create(
+        department.id,
+        input.fields,
+        ownerIds.map((userId) => ({ userId, approvalLevel: 1 })),
+      );
       await tx.writeAudit({
         actorId: actor.id,
         entityType: "resource",
