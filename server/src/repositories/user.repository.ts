@@ -58,6 +58,14 @@ export class UserRepository {
     }
   }
 
+  /**
+   * Row-locks a user for the rest of the current transaction, so the state
+   * read next (e.g. an audit "before" snapshot) cannot change underneath it.
+   */
+  async lockById(id: string): Promise<void> {
+    await this.db.$executeRaw`SELECT 1 FROM "users" WHERE "id" = ${id}::uuid FOR UPDATE`;
+  }
+
   updateRole(id: string, role: UserRole): Promise<User> {
     return this.db.user.update({ where: { id }, data: { role }, select: userSelect });
   }

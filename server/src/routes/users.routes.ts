@@ -23,7 +23,7 @@ export function usersRouter(auth: AuthService, users: UserService): Router {
     const subject = { targetUserId: id };
     if (!can(actor, "user:change_role", subject)) throw denial(actor, "user:change_role", subject);
 
-    respond(res, 200, userDto, await users.changeRole(id, role));
+    respond(res, 200, userDto, await users.changeRole(actor, id, role));
   });
 
   return router;

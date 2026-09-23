@@ -1,4 +1,6 @@
 import type { DbClient, PrismaClient } from "../db/prisma.js";
+import type { AuditEntry } from "../domain/audit.js";
+import { AuditRepository } from "./audit.repository.js";
 import { DepartmentRepository } from "./department.repository.js";
 import { RefreshTokenRepository } from "./refresh-token.repository.js";
 import { ResourceRepository } from "./resource.repository.js";
@@ -11,6 +13,16 @@ export interface Repositories {
   resources: ResourceRepository;
 }
 
+/**
+ * Repositories bound to an open transaction, plus `writeAudit`. The audit
+ * writer exists only here — never on `uow.read` — so an audit row can only be
+ * written inside the same transaction as the mutation it records, and rolls
+ * back with it.
+ */
+export interface TxRepositories extends Repositories {
+  writeAudit(entry: AuditEntry): Promise<void>;
+}
+
 export function createRepositories(db: DbClient): Repositories {
   return {
     departments: new DepartmentRepository(db),
@@ -20,19 +32,24 @@ export function createRepositories(db: DbClient): Repositories {
   };
 }
 
+function createTxRepositories(tx: DbClient): TxRepositories {
+  const audit = new AuditRepository(tx);
+  return { ...createRepositories(tx), writeAudit: (entry) => audit.insert(entry) };
+}
+
 /**
  * The only way services reach the database. `read` uses the root client;
  * `transaction` gives one Prisma transaction per mutation, with every
- * repository bound to it.
+ * repository (and the audit writer) bound to it.
  */
 export interface UnitOfWork {
   read: Repositories;
-  transaction<T>(work: (repos: Repositories) => Promise<T>): Promise<T>;
+  transaction<T>(work: (tx: TxRepositories) => Promise<T>): Promise<T>;
 }
 
 export function createUnitOfWork(prisma: PrismaClient): UnitOfWork {
   return {
     read: createRepositories(prisma),
-    transaction: (work) => prisma.$transaction((tx) => work(createRepositories(tx))),
+    transaction: (work) => prisma.$transaction((tx) => work(createTxRepositories(tx))),
   };
 }

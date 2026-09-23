@@ -1,5 +1,5 @@
 import { DomainError, resourceNotFound } from "../domain/errors.js";
-import type { Resource, User } from "../domain/types.js";
+import type { Actor, Resource, User } from "../domain/types.js";
 import type { Repositories, UnitOfWork } from "../repositories/index.js";
 import type { ResourceFields, ResourceFilter } from "../repositories/resource.repository.js";
 
@@ -22,33 +22,59 @@ export class ResourceService {
     return resource;
   }
 
-  create(input: { departmentId: string; fields: ResourceFields; ownerIds: string[] }): Promise<Resource> {
+  create(
+    actor: Actor,
+    input: { departmentId: string; fields: ResourceFields; ownerIds: string[] },
+  ): Promise<Resource> {
     assertSlotBounds(input.fields.minSlotMinutes, input.fields.maxSlotMinutes);
     const ownerIds = [...new Set(input.ownerIds)];
 
-    return this.uow.transaction(async (repos) => {
-      const department = await repos.departments.findById(input.departmentId);
+    return this.uow.transaction(async (tx) => {
+      const department = await tx.departments.findById(input.departmentId);
       if (!department) throw new DomainError("DEPARTMENT_NOT_FOUND", "Department does not exist");
-      await assertEligibleOwners(repos, ownerIds, department.id);
-      return repos.resources.create(department.id, input.fields, ownerIds);
+      await assertEligibleOwners(tx, ownerIds, department.id);
+
+      const created = await tx.resources.create(department.id, input.fields, ownerIds);
+      await tx.writeAudit({
+        actorId: actor.id,
+        entityType: "resource",
+        entityId: created.id,
+        action: "resource.created",
+        before: null,
+        after: created,
+      });
+      return created;
     });
   }
 
-  update(id: string, patch: Partial<ResourceFields>): Promise<Resource> {
-    return this.uow.transaction(async (repos) => {
-      const current = await repos.resources.findById(id);
-      if (!current) throw resourceNotFound();
-      assertSlotBounds(
-        patch.minSlotMinutes ?? current.minSlotMinutes,
-        patch.maxSlotMinutes ?? current.maxSlotMinutes,
-      );
-      return repos.resources.update(id, patch);
-    });
+  update(actor: Actor, id: string, patch: Partial<ResourceFields>): Promise<Resource> {
+    return this.applyChange(actor, id, patch, "resource.updated");
   }
 
   /** Soft delete: bookings (Phase 2+) will reference resources, so rows are never removed. */
-  deactivate(id: string): Promise<Resource> {
-    return this.update(id, { isActive: false });
+  deactivate(actor: Actor, id: string): Promise<Resource> {
+    return this.applyChange(actor, id, { isActive: false }, "resource.deactivated");
+  }
+
+  private applyChange(
+    actor: Actor,
+    id: string,
+    patch: Partial<ResourceFields>,
+    action: "resource.updated" | "resource.deactivated",
+  ): Promise<Resource> {
+    return this.uow.transaction(async (tx) => {
+      await tx.resources.lockById(id);
+      const before = await tx.resources.findById(id);
+      if (!before) throw resourceNotFound();
+      assertSlotBounds(
+        patch.minSlotMinutes ?? before.minSlotMinutes,
+        patch.maxSlotMinutes ?? before.maxSlotMinutes,
+      );
+
+      const after = await tx.resources.update(id, patch);
+      await tx.writeAudit({ actorId: actor.id, entityType: "resource", entityId: id, action, before, after });
+      return after;
+    });
   }
 }
 

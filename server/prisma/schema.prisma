@@ -53,6 +53,7 @@ model User {
   department     Department      @relation(fields: [departmentId], references: [id], onDelete: Restrict)
   ownedResources ResourceOwner[]
   refreshTokens  RefreshToken[]
+  auditEntries   AuditLog[]
 
   @@index([departmentId])
   @@map("users")
@@ -109,4 +110,25 @@ model RefreshToken {
   @@index([familyId])
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+// Append-only record of mutations, written by writeAudit() inside the same
+// transaction as the change it describes. Snapshots are redacted: no
+// password hashes, QR secrets or tokens are ever stored here.
+model AuditLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  // Nullable for future system actors (scheduled jobs); every Phase 1
+  // mutation records the acting user.
+  actorId    String?  @map("actor_id") @db.Uuid
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id") @db.Uuid
+  action     String
+  before     Json?    @db.JsonB
+  after      Json?    @db.JsonB
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId])
+  @@map("audit_log")
 }

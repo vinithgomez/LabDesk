@@ -91,6 +91,14 @@ export class ResourceRepository {
     return toResource(row);
   }
 
+  /**
+   * Row-locks a resource for the rest of the current transaction, so the
+   * state read next (e.g. an audit "before" snapshot) cannot change underneath it.
+   */
+  async lockById(id: string): Promise<void> {
+    await this.db.$executeRaw`SELECT 1 FROM "resources" WHERE "id" = ${id}::uuid FOR UPDATE`;
+  }
+
   async update(id: string, patch: Partial<ResourceFields>): Promise<Resource> {
     const row = await this.db.resource.update({ where: { id }, data: patch, select: resourceSelect });
     return toResource(row);

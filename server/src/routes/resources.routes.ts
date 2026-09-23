@@ -126,7 +126,7 @@ export function resourcesRouter(auth: AuthService, resources: ResourceService): 
     const subject = { departmentId, ownerIds: [] };
     if (!can(actor, "resource:manage", subject)) throw denial(actor, "resource:manage", subject);
 
-    respond(res, 201, resourceDto, await resources.create({ departmentId, fields, ownerIds }));
+    respond(res, 201, resourceDto, await resources.create(actor, { departmentId, fields, ownerIds }));
   });
 
   router.patch("/:id", async (req, res) => {
@@ -137,7 +137,7 @@ export function resourcesRouter(auth: AuthService, resources: ResourceService): 
     const resource = await resources.get(id);
     if (!can(actor, "resource:manage", resource)) throw denial(actor, "resource:manage", resource);
 
-    respond(res, 200, resourceDto, await resources.update(id, patch));
+    respond(res, 200, resourceDto, await resources.update(actor, id, patch));
   });
 
   router.delete("/:id", async (req, res) => {
@@ -147,7 +147,7 @@ export function resourcesRouter(auth: AuthService, resources: ResourceService): 
     const resource = await resources.get(id);
     if (!can(actor, "resource:manage", resource)) throw denial(actor, "resource:manage", resource);
 
-    respond(res, 200, resourceDto, await resources.deactivate(id));
+    respond(res, 200, resourceDto, await resources.deactivate(actor, id));
   });
 
   return router;
