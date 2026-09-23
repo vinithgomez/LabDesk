@@ -1,4 +1,5 @@
 import type { DbClient } from "../db/prisma.js";
+import type { TxClient } from "../db/transaction.js";
 import type { Resource, ResourceType } from "../domain/types.js";
 
 // qr_secret is intentionally never selected here; only the (Phase 4) QR
@@ -50,8 +51,9 @@ export interface ResourceFilter {
   isActive?: boolean | undefined;
 }
 
-export class ResourceRepository {
-  constructor(private readonly db: DbClient) {}
+/** Read-only resource queries. Safe on any client, so this is what `uow.read.resources` exposes. */
+export class ResourceReader {
+  constructor(protected readonly db: DbClient) {}
 
   async findById(id: string): Promise<Resource | null> {
     const row = await this.db.resource.findUnique({ where: { id }, select: resourceSelect });
@@ -84,9 +86,21 @@ export class ResourceRepository {
     });
     return rows.map(toResource);
   }
+}
+
+/**
+ * Resource writes. The constructor accepts only a TxClient: `lockById` and
+ * `lockForShare` take row locks that would be released immediately outside a
+ * transaction, and `create` / `update` must commit together with their audit
+ * row.
+ */
+export class ResourceWriter extends ResourceReader {
+  constructor(private readonly tx: TxClient) {
+    super(tx);
+  }
 
   async create(departmentId: string, fields: ResourceFields, ownerIds: string[]): Promise<Resource> {
-    const row = await this.db.resource.create({
+    const row = await this.tx.resource.create({
       data: {
         ...fields,
         departmentId,
@@ -102,7 +116,7 @@ export class ResourceRepository {
    * state read next (e.g. an audit "before" snapshot) cannot change underneath it.
    */
   async lockById(id: string): Promise<void> {
-    await this.db.$executeRaw`SELECT 1 FROM "resources" WHERE "id" = ${id}::uuid FOR UPDATE`;
+    await this.tx.$executeRaw`SELECT 1 FROM "resources" WHERE "id" = ${id}::uuid FOR UPDATE`;
   }
 
   /**
@@ -112,11 +126,11 @@ export class ResourceRepository {
    * serializes against in-flight bookings.
    */
   async lockForShare(id: string): Promise<void> {
-    await this.db.$executeRaw`SELECT 1 FROM "resources" WHERE "id" = ${id}::uuid FOR SHARE`;
+    await this.tx.$executeRaw`SELECT 1 FROM "resources" WHERE "id" = ${id}::uuid FOR SHARE`;
   }
 
   async update(id: string, patch: Partial<ResourceFields>): Promise<Resource> {
-    const row = await this.db.resource.update({ where: { id }, data: patch, select: resourceSelect });
+    const row = await this.tx.resource.update({ where: { id }, data: patch, select: resourceSelect });
     return toResource(row);
   }
 }

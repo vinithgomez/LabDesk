@@ -6,28 +6,32 @@ import { BookingReader, BookingWriter } from "./booking.repository.js";
 import { DepartmentRepository } from "./department.repository.js";
 import { MaintenanceRepository } from "./maintenance.repository.js";
 import { RefreshTokenRepository } from "./refresh-token.repository.js";
-import { ResourceRepository } from "./resource.repository.js";
-import { UserRepository } from "./user.repository.js";
+import { ResourceReader, ResourceWriter } from "./resource.repository.js";
+import { UserReader, UserWriter } from "./user.repository.js";
 
 export interface Repositories {
   departments: DepartmentRepository;
-  users: UserRepository;
+  // users, resources and bookings are read-only here: their writes and row
+  // locks need a transaction (see TxRepositories).
+  users: UserReader;
   refreshTokens: RefreshTokenRepository;
-  resources: ResourceRepository;
-  /** Read-only here: booking writes need a transaction (see TxRepositories). */
+  resources: ResourceReader;
   bookings: BookingReader;
   maintenance: MaintenanceRepository;
 }
 
 /**
- * Repositories bound to an open transaction. Two capabilities exist only
+ * Repositories bound to an open transaction. These capabilities exist only
  * here — never on `uow.read` — so misuse is a compile error:
  *  - `writeAudit`: an audit row is always written in the same transaction as
  *    the mutation it records, and rolls back with it.
- *  - `bookings` is a BookingWriter: `insert` relies on a transaction-scoped
- *    advisory lock that would silently do nothing outside a transaction.
+ *  - the *Writer repositories: row locks (FOR UPDATE / FOR SHARE) and the
+ *    booking advisory lock would silently do nothing outside a transaction,
+ *    and audited writes must commit with their audit row.
  */
 export interface TxRepositories extends Repositories {
+  users: UserWriter;
+  resources: ResourceWriter;
   bookings: BookingWriter;
   writeAudit(entry: AuditEntry): Promise<void>;
 }
@@ -35,9 +39,9 @@ export interface TxRepositories extends Repositories {
 export function createRepositories(db: DbClient): Repositories {
   return {
     departments: new DepartmentRepository(db),
-    users: new UserRepository(db),
+    users: new UserReader(db),
     refreshTokens: new RefreshTokenRepository(db),
-    resources: new ResourceRepository(db),
+    resources: new ResourceReader(db),
     bookings: new BookingReader(db),
     maintenance: new MaintenanceRepository(db),
   };
@@ -47,6 +51,8 @@ export function createTxRepositories(tx: TxClient): TxRepositories {
   const audit = new AuditRepository(tx);
   return {
     ...createRepositories(tx),
+    users: new UserWriter(tx),
+    resources: new ResourceWriter(tx),
     bookings: new BookingWriter(tx),
     writeAudit: (entry) => audit.insert(entry),
   };

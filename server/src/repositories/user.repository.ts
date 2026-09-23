@@ -1,4 +1,5 @@
 import { isUniqueViolation, type DbClient } from "../db/prisma.js";
+import type { TxClient } from "../db/transaction.js";
 import type { User, UserCredentials, UserRole, UserWithDepartment } from "../domain/types.js";
 
 const userSelect = {
@@ -20,8 +21,9 @@ export interface NewUser {
   rollNo: string | null;
 }
 
-export class UserRepository {
-  constructor(private readonly db: DbClient) {}
+/** Read-only user queries. Safe on any client, so this is what `uow.read.users` exposes. */
+export class UserReader {
+  constructor(protected readonly db: DbClient) {}
 
   findById(id: string): Promise<User | null> {
     return this.db.user.findUnique({ where: { id }, select: userSelect });
@@ -44,14 +46,27 @@ export class UserRepository {
   findManyByIds(ids: string[]): Promise<User[]> {
     return this.db.user.findMany({ where: { id: { in: ids } }, select: userSelect });
   }
+}
+
+/**
+ * User writes. The constructor accepts only a TxClient: `lockById` takes a
+ * row lock that would be released immediately outside a transaction, and
+ * `updateRole` must commit together with its audit row.
+ */
+export class UserWriter extends UserReader {
+  constructor(private readonly tx: TxClient) {
+    super(tx);
+  }
 
   /**
    * Inserts a user. `role` is deliberately not accepted: every new account
-   * takes the database default ('student'). Returns null if the email is taken.
+   * takes the database default ('student'). Returns null if the email is
+   * taken — the unique violation has then aborted the transaction, so the
+   * caller must end it (throw) rather than issue further statements.
    */
   async create(input: NewUser): Promise<User | null> {
     try {
-      return await this.db.user.create({ data: input, select: userSelect });
+      return await this.tx.user.create({ data: input, select: userSelect });
     } catch (err) {
       if (isUniqueViolation(err)) return null;
       throw err;
@@ -63,10 +78,10 @@ export class UserRepository {
    * read next (e.g. an audit "before" snapshot) cannot change underneath it.
    */
   async lockById(id: string): Promise<void> {
-    await this.db.$executeRaw`SELECT 1 FROM "users" WHERE "id" = ${id}::uuid FOR UPDATE`;
+    await this.tx.$executeRaw`SELECT 1 FROM "users" WHERE "id" = ${id}::uuid FOR UPDATE`;
   }
 
   updateRole(id: string, role: UserRole): Promise<User> {
-    return this.db.user.update({ where: { id }, data: { role }, select: userSelect });
+    return this.tx.user.update({ where: { id }, data: { role }, select: userSelect });
   }
 }

@@ -43,16 +43,18 @@ export class AuthService {
     }
 
     const passwordHash = await this.passwords.hash(input.password);
-    const created = await this.uow.read.users.create({
-      email: input.email,
-      passwordHash,
-      fullName: input.fullName,
-      departmentId: department.id,
-      rollNo: input.rollNo ?? null,
+    const created = await this.uow.transaction(async (tx) => {
+      const user = await tx.users.create({
+        email: input.email,
+        passwordHash,
+        fullName: input.fullName,
+        departmentId: department.id,
+        rollNo: input.rollNo ?? null,
+      });
+      // A taken email aborts the transaction; throwing here rolls it back.
+      if (!user) throw new DomainError("EMAIL_TAKEN", "An account with this email already exists");
+      return user;
     });
-    if (!created) {
-      throw new DomainError("EMAIL_TAKEN", "An account with this email already exists");
-    }
 
     return this.startSession({ ...created, department });
   }
