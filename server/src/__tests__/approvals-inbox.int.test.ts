@@ -134,13 +134,18 @@ describe("GET /api/bookings/pending", () => {
     const stalledOf = async (id: string) => (await inbox(admin)).find((e) => e.id === id)?.stalled;
     expect(await stalledOf(ids.p3)).toBe(false); // level 1 approved just now
 
+    // A level-1 approval made 25h ago. booking_approvals is append-only, so the
+    // fixture records the decision with its historical timestamp rather than
+    // rewriting an existing row.
+    expect(await stalledOf(ids.p2)).toBe(false);
     await h.prisma.$executeRaw`
-      UPDATE booking_approvals SET decided_at = now() - interval '25 hours' WHERE booking_id = ${ids.p3}::uuid`;
-    expect(await stalledOf(ids.p3)).toBe(true);
+      INSERT INTO booking_approvals (booking_id, level, approver_id, decision, decided_at)
+      VALUES (${ids.p2}::uuid, 1, ${faculty1.id}::uuid, 'approved', now() - interval '25 hours')`;
+    expect(await stalledOf(ids.p2)).toBe(true);
 
     // Waiting on level 1 is ordinary pending, not stalled, however old.
-    await h.prisma.$executeRaw`UPDATE bookings SET created_at = now() - interval '3 days' WHERE id = ${ids.p2}::uuid`;
-    expect(await stalledOf(ids.p2)).toBe(false);
+    await h.prisma.$executeRaw`UPDATE bookings SET created_at = now() - interval '3 days' WHERE id = ${ids.p1}::uuid`;
+    expect(await stalledOf(ids.p1)).toBe(false);
   });
 
   it("flags bookings whose start has passed as lapsed", async () => {
