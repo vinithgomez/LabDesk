@@ -42,9 +42,16 @@ export interface BookingSubject {
   resource: { id: string; departmentId: string; ownerIds: readonly string[] };
 }
 
+/** Subject for `resource:manage_owners`: the resource whose owners change. */
+export interface ResourceOwnersSubject {
+  id: string;
+  departmentId: string;
+}
+
 export interface PolicySubjects {
   "resource:view": ResourceViewSubject;
   "resource:manage": ResourceManageSubject;
+  "resource:manage_owners": ResourceOwnersSubject;
   "user:change_role": RoleChangeSubject;
   "booking:create": BookingCreateSubject;
   "booking:view": BookingSubject;
@@ -75,6 +82,10 @@ const rules: { [A in Action]: Rule<A> } = {
   // department so a stale owner row can never reach across departments.
   "resource:manage": (actor, s) =>
     isAdmin(actor) || (s.departmentId === actor.departmentId && s.ownerIds.includes(actor.id)),
+
+  // Admin only. Owners approve bookings, so adding an owner grants approval
+  // power; like resource creation, that is not delegated to owners.
+  "resource:manage_owners": (actor) => isAdmin(actor),
 
   // Only an admin can change a role (§2b), and never their own — an admin
   // demoting themselves could leave the system with no admin.
@@ -135,6 +146,7 @@ const hiddenResource = (actor: Actor, s: { id?: string; departmentId: string | n
 const denials: { [A in Action]?: Denial<A> } = {
   "resource:view": hiddenResource,
   "resource:manage": hiddenResource,
+  "resource:manage_owners": hiddenResource,
   "booking:create": (actor, r) => {
     const hidden = hiddenResource(actor, r);
     if (hidden) return hidden;

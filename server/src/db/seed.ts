@@ -43,7 +43,8 @@ interface SeedResource {
   minSlotMinutes: number;
   maxSlotMinutes: number;
   bookingHorizonDays: number;
-  owners: string[];
+  /** Owner emails with the approval level each decides at. */
+  owners: { email: string; level: 1 | 2 }[];
 }
 
 const DEPARTMENTS = [
@@ -68,34 +69,44 @@ const RESOURCES: SeedResource[] = [
   {
     dept: "CSE", name: "Systems Lab L-201", type: "lab", location: "Block A, 2nd floor", capacity: 40,
     description: "40 Linux workstations, projector.", requiresApproval: false, approvalLevels: 1,
-    minSlotMinutes: 60, maxSlotMinutes: 180, bookingHorizonDays: 14, owners: ["ravi.kumar@college.edu"],
+    minSlotMinutes: 60, maxSlotMinutes: 180, bookingHorizonDays: 14,
+    owners: [{ email: "ravi.kumar@college.edu", level: 1 }],
   },
   {
     dept: "CSE", name: "GPU Workstation #1", type: "equipment", location: "Block A, Room 214", capacity: 1,
     description: "RTX-class GPU box for ML coursework and projects.", requiresApproval: true, approvalLevels: 2,
     minSlotMinutes: 60, maxSlotMinutes: 240, bookingHorizonDays: 7,
-    owners: ["anita.rao@college.edu", "ravi.kumar@college.edu"],
+    owners: [
+      { email: "anita.rao@college.edu", level: 1 },
+      { email: "ravi.kumar@college.edu", level: 2 },
+    ],
   },
   {
     dept: "CSE", name: "Seminar Room S-1", type: "room", location: "Block A, ground floor", capacity: 60,
     description: "Seminar hall with AV setup.", requiresApproval: true, approvalLevels: 1,
-    minSlotMinutes: 30, maxSlotMinutes: 240, bookingHorizonDays: 30, owners: ["anita.rao@college.edu"],
+    minSlotMinutes: 30, maxSlotMinutes: 240, bookingHorizonDays: 30,
+    owners: [{ email: "anita.rao@college.edu", level: 1 }],
   },
   {
     dept: "ECE", name: "VLSI Design Lab", type: "lab", location: "Block C, 1st floor", capacity: 30,
     description: "EDA workstations with FPGA boards.", requiresApproval: false, approvalLevels: 1,
-    minSlotMinutes: 60, maxSlotMinutes: 180, bookingHorizonDays: 14, owners: ["suresh.menon@college.edu"],
+    minSlotMinutes: 60, maxSlotMinutes: 180, bookingHorizonDays: 14,
+    owners: [{ email: "suresh.menon@college.edu", level: 1 }],
   },
   {
     dept: "ECE", name: "Digital Storage Oscilloscope", type: "equipment", location: "Block C, Room 105", capacity: 1,
     description: "4-channel 200 MHz DSO.", requiresApproval: true, approvalLevels: 1,
-    minSlotMinutes: 30, maxSlotMinutes: 120, bookingHorizonDays: 7, owners: ["suresh.menon@college.edu"],
+    minSlotMinutes: 30, maxSlotMinutes: 120, bookingHorizonDays: 7,
+    owners: [{ email: "suresh.menon@college.edu", level: 1 }],
   },
   {
     dept: "ECE", name: "Embedded Systems Lab", type: "lab", location: "Block C, 2nd floor", capacity: 36,
     description: "Microcontroller kits and bench power supplies.", requiresApproval: true, approvalLevels: 2,
     minSlotMinutes: 60, maxSlotMinutes: 180, bookingHorizonDays: 14,
-    owners: ["meera.iyer@college.edu", "suresh.menon@college.edu"],
+    owners: [
+      { email: "meera.iyer@college.edu", level: 1 },
+      { email: "suresh.menon@college.edu", level: 2 },
+    ],
   },
 ];
 
@@ -155,19 +166,20 @@ async function main(): Promise<void> {
 
     for (const { dept, owners, ...fields } of RESOURCES) {
       const departmentId = deptId(dept);
-      const ownerIds = owners.map((email) => {
+      const ownerRows = owners.map(({ email, level }) => {
         const id = userIds.get(email);
         if (!id) throw new Error(`Owner ${email} was not seeded`);
-        return id;
+        return { userId: id, approvalLevel: level };
       });
       await prisma.$transaction(async (tx) => {
         const existing = await tx.resource.findFirst({ where: { departmentId, name: fields.name }, select: { id: true } });
         const resource = existing
           ? await tx.resource.update({ where: { id: existing.id }, data: fields, select: { id: true } })
           : await tx.resource.create({ data: { ...fields, departmentId }, select: { id: true } });
+        // Re-seeding resets the owner set to exactly the seed definition.
+        await tx.resourceOwner.deleteMany({ where: { resourceId: resource.id } });
         await tx.resourceOwner.createMany({
-          data: ownerIds.map((userId) => ({ resourceId: resource.id, userId })),
-          skipDuplicates: true,
+          data: ownerRows.map((o) => ({ resourceId: resource.id, ...o })),
         });
       });
     }

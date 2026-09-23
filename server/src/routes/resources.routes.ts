@@ -27,6 +27,15 @@ const resourceFields = {
   isActive: z.boolean(),
 };
 
+/** An owner and the approval level (1 or 2) they decide at. */
+const ownerInput = z.strictObject({
+  userId: z.uuid(),
+  approvalLevel: z.union([z.literal(1), z.literal(2)]).default(1),
+});
+
+/** Replaces the owner set wholesale. An empty list is allowed only if the resource doesn't require approval. */
+export const replaceOwnersBody = z.strictObject({ owners: z.array(ownerInput).max(20) });
+
 export const createResourceBody = z
   .strictObject({
     departmentId: z.uuid(),
@@ -41,7 +50,7 @@ export const createResourceBody = z
     maxSlotMinutes: resourceFields.maxSlotMinutes.default(180),
     bookingHorizonDays: resourceFields.bookingHorizonDays.default(14),
     isActive: resourceFields.isActive.default(true),
-    ownerIds: z.array(z.uuid()).max(20).default([]),
+    owners: z.array(ownerInput).max(20).default([]),
   })
   .refine((b) => b.minSlotMinutes <= b.maxSlotMinutes, {
     message: "minSlotMinutes must not exceed maxSlotMinutes",
@@ -88,6 +97,7 @@ export const resourceDto = z.object({
   bookingHorizonDays: z.number(),
   isActive: z.boolean(),
   ownerIds: z.array(z.string()),
+  owners: z.array(z.object({ userId: z.string(), approvalLevel: z.number() })),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
 });
@@ -110,6 +120,7 @@ export const availabilityDto = z.object({
 });
 
 export type CreateResourceBody = z.input<typeof createResourceBody>;
+export type ReplaceOwnersBody = z.input<typeof replaceOwnersBody>;
 export type AvailabilityQuery = z.input<typeof availabilityQuery>;
 export type AvailabilityDto = z.output<typeof availabilityDto>;
 export type UpdateResourceBody = z.input<typeof updateResourceBody>;
@@ -166,13 +177,13 @@ export function resourcesRouter(auth: AuthService, resources: ResourceService, b
 
   router.post("/", async (req, res) => {
     const actor = actorOf(req);
-    const { departmentId, ownerIds, ...fields } = createResourceBody.parse(req.body);
+    const { departmentId, owners, ...fields } = createResourceBody.parse(req.body);
 
     // A resource that doesn't exist yet has no owners, so only admins pass.
     const subject = { departmentId, ownerIds: [] };
     if (!can(actor, "resource:manage", subject)) throw denial(actor, "resource:manage", subject);
 
-    respond(res, 201, resourceDto, await resources.create(actor, { departmentId, fields, ownerIds }));
+    respond(res, 201, resourceDto, await resources.create(actor, { departmentId, fields, owners }));
   });
 
   router.patch("/:id", async (req, res) => {
@@ -184,6 +195,17 @@ export function resourcesRouter(auth: AuthService, resources: ResourceService, b
     if (!can(actor, "resource:manage", resource)) throw denial(actor, "resource:manage", resource);
 
     respond(res, 200, resourceDto, await resources.update(actor, id, patch));
+  });
+
+  router.patch("/:id/owners", async (req, res) => {
+    const actor = actorOf(req);
+    const { id } = idParams.parse(req.params);
+    const { owners } = replaceOwnersBody.parse(req.body);
+
+    const resource = await resources.get(id);
+    if (!can(actor, "resource:manage_owners", resource)) throw denial(actor, "resource:manage_owners", resource);
+
+    respond(res, 200, resourceDto, await resources.replaceOwners(actor, id, owners));
   });
 
   router.delete("/:id", async (req, res) => {

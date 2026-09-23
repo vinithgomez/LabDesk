@@ -130,3 +130,20 @@ describe("policy: bookings", () => {
     expect(bookingListScope(actor("faculty"), { mine: false })).toEqual({ kind: "ownOrManaged", userId: "faculty-1" });
   });
 });
+
+describe("policy: resource:manage_owners", () => {
+  const lab = { id: "r-1", departmentId: DEPT_A };
+
+  it("is admin-only, including for the resource's own owners and staff", () => {
+    expect(can(actor("admin"), "resource:manage_owners", lab)).toBe(true);
+    expect(can(actor("admin"), "resource:manage_owners", { ...lab, departmentId: DEPT_B })).toBe(true);
+    for (const role of ["student", "faculty", "lab_incharge"] as const) {
+      expect(can(actor(role), "resource:manage_owners", lab)).toBe(false);
+    }
+  });
+
+  it("hides other departments' resources (NOT_FOUND) and forbids the rest", () => {
+    expect(denial(actor("faculty"), "resource:manage_owners", { ...lab, departmentId: DEPT_B }).code).toBe("NOT_FOUND");
+    expect(denial(actor("faculty"), "resource:manage_owners", lab).code).toBe("FORBIDDEN");
+  });
+});

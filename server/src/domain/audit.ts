@@ -11,6 +11,7 @@ export type AuditAction =
   | "resource.created"
   | "resource.updated"
   | "resource.deactivated"
+  | "resource.owners_changed"
   | "booking.created"
   | "booking.cancelled";
 

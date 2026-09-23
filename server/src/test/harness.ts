@@ -82,7 +82,12 @@ export async function registerUser(
 export interface ResourceFixture {
   departmentId: string;
   name?: string;
+  /** Level-1 owners (shorthand). */
   ownerIds?: string[];
+  /** Owners with explicit approval levels. */
+  owners?: { userId: string; approvalLevel: number }[];
+  requiresApproval?: boolean;
+  approvalLevels?: number;
   isActive?: boolean;
   capacity?: number;
   minSlotMinutes?: number;
@@ -103,7 +108,14 @@ export async function createResource(prisma: PrismaClient, f: ResourceFixture): 
       maxSlotMinutes: f.maxSlotMinutes ?? 120,
       bookingHorizonDays: f.bookingHorizonDays ?? 7,
       isActive: f.isActive ?? true,
-      owners: { create: (f.ownerIds ?? []).map((userId) => ({ userId })) },
+      requiresApproval: f.requiresApproval ?? false,
+      approvalLevels: f.approvalLevels ?? 1,
+      owners: {
+        create: [
+          ...(f.ownerIds ?? []).map((userId) => ({ userId, approvalLevel: 1 })),
+          ...(f.owners ?? []),
+        ],
+      },
     },
   });
   return row.id;

@@ -107,7 +107,7 @@ describe("audit log", () => {
     const created = await request(h.app)
       .post("/api/resources")
       .set(admin.auth)
-      .send({ departmentId: deptId, name: "GPU Box", type: "equipment", location: "R1", capacity: 1, ownerIds: [incharge.id] });
+      .send({ departmentId: deptId, name: "GPU Box", type: "equipment", location: "R1", capacity: 1, owners: [{ userId: incharge.id }] });
     expect(created.status).toBe(201);
     const id: string = created.body.data.id;
 
