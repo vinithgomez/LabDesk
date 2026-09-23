@@ -78,3 +78,72 @@ export async function registerUser(
     auth: { Authorization: `Bearer ${body.data.accessToken}` },
   };
 }
+
+export interface ResourceFixture {
+  departmentId: string;
+  name?: string;
+  ownerIds?: string[];
+  isActive?: boolean;
+  capacity?: number;
+  minSlotMinutes?: number;
+  maxSlotMinutes?: number;
+  bookingHorizonDays?: number;
+}
+
+/** Creates a resource directly. Defaults: capacity 30, 30–120 minute slots, 7-day horizon. */
+export async function createResource(prisma: PrismaClient, f: ResourceFixture): Promise<string> {
+  const row = await prisma.resource.create({
+    data: {
+      departmentId: f.departmentId,
+      name: f.name ?? "Test Lab",
+      type: "lab",
+      location: "Block A",
+      capacity: f.capacity ?? 30,
+      minSlotMinutes: f.minSlotMinutes ?? 30,
+      maxSlotMinutes: f.maxSlotMinutes ?? 120,
+      bookingHorizonDays: f.bookingHorizonDays ?? 7,
+      isActive: f.isActive ?? true,
+      owners: { create: (f.ownerIds ?? []).map((userId) => ({ userId })) },
+    },
+  });
+  return row.id;
+}
+
+/**
+ * A slot on the IST calendar `daysAhead` days from today, as ISO strings with
+ * an explicit +05:30 offset. `endDaysAhead` lets a slot cross midnight.
+ */
+export function istSlot(
+  daysAhead: number,
+  startHHMM: string,
+  endHHMM: string,
+  endDaysAhead: number = daysAhead,
+): { start: string; end: string } {
+  const istDay = (d: number): string =>
+    new Date(Date.now() + d * 86_400_000 + 330 * 60_000).toISOString().slice(0, 10);
+  return {
+    start: `${istDay(daysAhead)}T${startHHMM}:00+05:30`,
+    end: `${istDay(endDaysAhead)}T${endHHMM}:00+05:30`,
+  };
+}
+
+let keyCounter = 0;
+
+/** POST /api/bookings with a fresh Idempotency-Key unless one is given. */
+export function book(
+  h: TestHarness,
+  user: TestUser,
+  body: Record<string, unknown>,
+  idempotencyKey: string = `test-key-${Date.now()}-${(keyCounter += 1)}`,
+): request.Test {
+  return request(h.app).post("/api/bookings").set(user.auth).set("Idempotency-Key", idempotencyKey).send(body);
+}
+
+export async function createMaintenanceWindow(
+  prisma: PrismaClient,
+  w: { resourceId: string; start: string; end: string; createdBy: string },
+): Promise<void> {
+  await prisma.$executeRaw`
+    INSERT INTO maintenance_windows (resource_id, period, reason, created_by)
+    VALUES (${w.resourceId}::uuid, tstzrange(${w.start}::timestamptz, ${w.end}::timestamptz, '[)'), 'test', ${w.createdBy}::uuid)`;
+}

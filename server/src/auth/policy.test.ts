@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Actor, UserRole } from "../domain/types.js";
-import { can, denial } from "./policy.js";
+import { bookingListScope, can, denial } from "./policy.js";
 
 const DEPT_A = "dept-a";
 const DEPT_B = "dept-b";
@@ -73,10 +73,60 @@ describe("policy: denial", () => {
     expect(denial(actor("student"), "user:change_role", { targetUserId: "x" }).code).toBe("FORBIDDEN");
   });
 
-  it("never returns WRONG_DEPARTMENT in Phase 1", () => {
+  it("never returns WRONG_DEPARTMENT for resource view/manage", () => {
     const subjects = [{ departmentId: DEPT_B }, { id: "r-1", departmentId: DEPT_B }, { departmentId: null }];
     for (const s of subjects) {
       expect(denial(actor("student"), "resource:view", s).code).not.toBe("WRONG_DEPARTMENT");
     }
+  });
+});
+
+describe("policy: bookings", () => {
+  const resourceA = { id: "r-a", departmentId: DEPT_A, isActive: true };
+  const bookingBy = (userId: string, status: "pending" | "checked_in" = "pending", ownerIds: string[] = ["owner-1"]) => ({
+    id: "b-1",
+    userId,
+    status,
+    resource: { id: "r-a", departmentId: DEPT_A, ownerIds },
+  });
+
+  it("booking:create requires an active resource in the actor's own department, admins included", () => {
+    expect(can(actor("student"), "booking:create", resourceA)).toBe(true);
+    expect(can(actor("student"), "booking:create", { ...resourceA, isActive: false })).toBe(false);
+    expect(can(actor("admin"), "booking:create", { ...resourceA, departmentId: DEPT_B })).toBe(false);
+  });
+
+  it("booking:create denials: hidden -> NOT_FOUND, visible-but-foreign -> WRONG_DEPARTMENT, inactive -> FORBIDDEN", () => {
+    const foreign = { ...resourceA, departmentId: DEPT_B };
+    expect(denial(actor("student"), "booking:create", foreign).code).toBe("NOT_FOUND");
+    expect(denial(actor("admin"), "booking:create", foreign).code).toBe("WRONG_DEPARTMENT");
+    expect(denial(actor("student"), "booking:create", { ...resourceA, isActive: false }).code).toBe("FORBIDDEN");
+  });
+
+  it("booking:view is booker, resource owner (same department) or admin", () => {
+    const student = actor("student");
+    expect(can(student, "booking:view", bookingBy(student.id))).toBe(true);
+    expect(can(student, "booking:view", bookingBy("someone-else"))).toBe(false);
+    expect(can(actor("faculty", { id: "owner-1" }), "booking:view", bookingBy("s"))).toBe(true);
+    expect(can(actor("faculty", { id: "owner-1", departmentId: DEPT_B }), "booking:view", bookingBy("s"))).toBe(false);
+    expect(can(actor("admin"), "booking:view", bookingBy("s"))).toBe(true);
+    expect(denial(student, "booking:view", bookingBy("someone-else")).code).toBe("NOT_FOUND");
+  });
+
+  it("booking:cancel: booker until checked in; resource owner and admin always", () => {
+    const student = actor("student");
+    expect(can(student, "booking:cancel", bookingBy(student.id))).toBe(true);
+    expect(can(student, "booking:cancel", bookingBy(student.id, "checked_in"))).toBe(false);
+    expect(denial(student, "booking:cancel", bookingBy(student.id, "checked_in")).code).toBe("FORBIDDEN");
+    expect(can(actor("faculty", { id: "owner-1" }), "booking:cancel", bookingBy("s", "checked_in"))).toBe(true);
+    expect(can(actor("admin"), "booking:cancel", bookingBy("s", "checked_in"))).toBe(true);
+    expect(can(actor("student", { id: "x" }), "booking:cancel", bookingBy("s"))).toBe(false);
+    expect(denial(actor("student", { id: "x" }), "booking:cancel", bookingBy("s")).code).toBe("NOT_FOUND");
+  });
+
+  it("bookingListScope: admins all, others own-or-managed, mine narrows to own", () => {
+    expect(bookingListScope(actor("admin"), { mine: false })).toEqual({ kind: "all" });
+    expect(bookingListScope(actor("admin"), { mine: true })).toEqual({ kind: "own", userId: "admin-1" });
+    expect(bookingListScope(actor("faculty"), { mine: false })).toEqual({ kind: "ownOrManaged", userId: "faculty-1" });
   });
 });
