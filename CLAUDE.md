@@ -72,6 +72,20 @@ These supersede anything earlier in this file that conflicts with them.
 
 **Admins may not book outside their department.** They can see the resource, so they receive `WRONG_DEPARTMENT` (403); students cannot see it, so they receive 404.
 
+**Approval level lives on the owner, not derived from role.** `resource_owners` gains `approval_level` (1 or 2), set via `PATCH /api/resources/:id/owners`. A resource's required approval levels must each keep at least one owner (`OWNER_REQUIRED`, 422) — this applies to resource create, update, and owner changes alike, so enabling approval on an owner-less resource is also refused.
+
+**Bookings on a resource with `requires_approval = false` are created directly as `approved`,** with no approval rows. `requires_approval` means what it says.
+
+**Owner management (`resource:manage_owners`) is admin-only,** consistent with resource creation and role changes — adding an owner grants approval power, which is a privilege escalation action.
+
+**Two-level approval stall handling (no background job required in Phase 3):** a booking flagged stalled in the inbox once level 1 has approved and level 2 has not acted for 24 hours, sorted by start time. Approving after the booking's start time returns 409; rejecting remains allowed and the inbox marks it lapsed. The booker may cancel a pending booking at any time. Closing lapsed pending bookings automatically is Phase 4's worker's job, not Phase 3's.
+
+**Admins decide approvals only within their own department** — another department's admin gets `WRONG_DEPARTMENT`, consistent with the admin-booking rule above.
+
+**`POST /api/resources` takes `owners: [{ userId, approvalLevel }]`**, not a bare list of IDs. `GET /api/bookings/:id` includes the approval trail and which level is currently awaiting a decision.
+
+**Known, accepted gaps carried into Phase 4+:** a resource's approval levels dropping from 2 to 1 while a booking awaits level 2 leaves that booking undecidable until its start time (cancellable in the meantime); a deactivated or demoted owner loses approval power but the owner row itself persists.
+
 **Additional endpoints** (beyond §9):
 ```
 GET    /api/departments                 public — signup form needs it
@@ -362,11 +376,55 @@ Complete and test each phase before moving on. Commit at meaningful boundaries �
 
 ---
 
-## 14. Conventions
+## 14. Git workflow
+
+Applies from Phase 3 onward. **Commit and push only when explicitly asked to in the prompt for that session — never automatically at the end of a task.** When asked, follow every rule below.
+
+**Commit in logical steps, then push.** One logical change per commit, never a whole phase squashed into one. Where a test-first sequence matters (a failing test, then the fix that turns it green), commit both states separately. Do not leave the working tree dirty or the branch unpushed once a commit/push has been requested and started.
+
+**No AI attribution in commit history, ever.** Commit messages and PR descriptions must not contain `Co-Authored-By: Claude`, `Generated with Claude Code`, `Claude-Session:`, or any other tool byline, trailer, emoji or session link. The author and committer are the repository owner alone, in every commit, with no exceptions. Do not rely on tooling to strip this — write the message correctly the first time.
+
+**Verification must complete, and be reviewed, before the push runs — never in the same batched command.** A push is not reversible the way a local commit is: a trailer or secret that reaches `origin` means rewriting pushed history. Run the check, read its output, confirm it's clean, and only then push as a separate step.
+
+**Before every push, confirm in order:**
+1. `npm test` passes and typecheck is clean
+2. `git log --oneline -n <count>` shows the expected messages with no trailers
+3. `git status` is empty
+4. only then: `git push`
+
+**`.gitignore` must be kept current.** Before each push, check that nothing below is tracked, and extend the file when the project grows:
+
+```
+node_modules/
+dist/
+build/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.pem
+*.key
+prisma/*.db
+prisma/*.db-journal
+.cache/
+tmp/
+.claude/
+```
+
+`.env` is never committed; `.env.example` always is. **Never commit** credentials, tokens, keys, or database volumes, and never use `git add -f` to bypass `.gitignore`. If a secret is ever committed, stop and report it immediately rather than pushing — rotating it is the fix, deleting the file in a later commit is not.
+
+---
+
+## 15. Conventions
 
 - TypeScript strict mode on, no `any`
 - Services return domain results; controllers translate to HTTP
 - One Prisma transaction per mutation, audit written inside it
 - Zod schemas colocated with routes, exported for frontend type inference
-- Conventional commits (`feat:`, `fix:`, `test:`, `chore:`)
 - No business logic in React components — hooks or query functions only
