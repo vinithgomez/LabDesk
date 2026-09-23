@@ -1,7 +1,29 @@
+# Dependencies and build output
 node_modules/
 dist/
-.env
-.env.local
-*.log
-.DS_Store
+build/
 coverage/
+.cache/
+tmp/
+
+# Environment and secrets (.env.example is the only env file tracked)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local databases (prisma lives under server/, hence **/)
+**/prisma/*.db
+**/prisma/*.db-journal
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.claude/
