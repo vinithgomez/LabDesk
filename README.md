@@ -43,7 +43,7 @@ requests failed with deadlock errors (40P01), the other 35 exceeded the
 15-second transaction timeout, and no booking succeeded.
 
 **The fix.** `BookingWriter.insert` takes a per-resource, transaction-scoped
-advisory lock, `pg_advisory_xact_lock(hashtextextended(resource_id::text, 0))`,
+advisory lock, `pg_advisory_xact_lock(19524, hashtext(resource_id::text))`,
 immediately before the INSERT. The lock orders inserts for one resource and
 checks nothing. Each later inserter finds the winner already committed and
 fails immediately with 23P01. Because the lock is transaction-scoped, `insert`

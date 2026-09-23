@@ -43,6 +43,14 @@ const BOOKING_COLUMNS = Prisma.sql`
   b.created_at            AS "createdAt",
   b.updated_at            AS "updatedAt"`;
 
+/**
+ * Advisory-lock namespace for booking inserts: "LD" (CLAUDE.md §2c). The
+ * two-argument pg_advisory_xact_lock(int4, int4) form keeps this key space
+ * separate from any other advisory lock; both keys must be int4, which is why
+ * the resource key is hashtext (int4), not hashtextextended (bigint).
+ */
+const BOOKING_INSERT_LOCK_NAMESPACE = 0x4c44; // 19524
+
 /** The unique partial index behind per-user idempotency keys (CLAUDE.md §4). */
 export const IDEMPOTENCY_INDEX = "bookings_user_idempotency_key";
 
@@ -187,8 +195,8 @@ export class BookingWriter extends BookingReader {
    */
   insert(b: NewBooking): Promise<Booking> {
     return translatingConstraints(async () => {
-      // Hash collisions are harmless: two resources sharing a key only serialize briefly, never a correctness issue.
-      await this.tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${b.resourceId}::text, 0))`;
+      // hashtext collisions are harmless: two resources sharing a key only serialize briefly, never a correctness issue.
+      await this.tx.$executeRaw`SELECT pg_advisory_xact_lock(${BOOKING_INSERT_LOCK_NAMESPACE}::int4, hashtext(${b.resourceId}::text))`;
       return single(
         await this.tx.$queryRaw`
           WITH inserted AS (

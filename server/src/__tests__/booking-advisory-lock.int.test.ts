@@ -34,6 +34,23 @@ async function advisoryLocksHeld(): Promise<number> {
 }
 
 /**
+ * The key of the single advisory lock held right now, as pg_locks reports it.
+ * The two-argument (int4, int4) form shows classid = first key, objid =
+ * second key, objsubid = 2; the one-argument bigint form shows objsubid = 1.
+ * classid/objid are unsigned oids, so they are compared as text.
+ */
+async function heldAdvisoryKey(): Promise<{ classid: string; objid: string; objsubid: number } | undefined> {
+  const [row] = z
+    .array(z.object({ classid: z.string(), objid: z.string(), objsubid: z.number() }))
+    .parse(
+      await h.prisma.$queryRaw`
+        SELECT classid::text AS classid, objid::text AS objid, objsubid::int AS objsubid
+        FROM pg_locks WHERE locktype = 'advisory' AND granted`,
+    );
+  return row;
+}
+
+/**
  * The premise behind requiring a TxClient for BookingWriter.insert
  * (see booking-insert-requires-tx.test-d.ts for the compile-time half).
  */
@@ -45,6 +62,7 @@ describe("per-resource booking advisory lock", () => {
     const slot = istSlot(1, "10:00", "11:00");
 
     let heldDuringTransaction = -1;
+    let keyDuringTransaction: Awaited<ReturnType<typeof heldAdvisoryKey>>;
     await runInTransaction(
       h.prisma,
       async (tx) => {
@@ -58,18 +76,29 @@ describe("per-resource booking advisory lock", () => {
           idempotencyKey: null,
         });
         heldDuringTransaction = await advisoryLocksHeld();
+        keyDuringTransaction = await heldAdvisoryKey();
       },
       TRANSACTION_OPTIONS,
     );
 
     expect(heldDuringTransaction).toBe(1);
     expect(await advisoryLocksHeld()).toBe(0);
+
+    // Namespaced two-argument form: (19524, hashtext(resource_id::text)).
+    // The int4 hash is stored as an unsigned oid, hence the modular mapping.
+    const [expected] = z
+      .array(z.object({ objid: z.string() }))
+      .parse(
+        await h.prisma.$queryRaw`
+          SELECT ((hashtext(${resourceId}::text)::int8 + 4294967296) % 4294967296)::text AS objid`,
+      );
+    expect(keyDuringTransaction).toEqual({ classid: String(0x4c44), objid: expected?.objid, objsubid: 2 });
   });
 
   it("is released immediately when taken outside a transaction (the hazard)", async () => {
     // Exactly what insert would do if it could run on the root client: the
     // lock lives only for this one statement's implicit transaction.
-    await h.prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${"any-resource"}::text, 0))`;
+    await h.prisma.$executeRaw`SELECT pg_advisory_xact_lock(${0x4c44}::int4, hashtext(${"any-resource"}::text))`;
     expect(await advisoryLocksHeld()).toBe(0);
   });
 });
