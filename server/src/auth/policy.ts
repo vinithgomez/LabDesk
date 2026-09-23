@@ -6,19 +6,22 @@
  * Phase 1 actions only. Later phases add booking/maintenance/analytics
  * actions here.
  */
-import { DomainError } from "../domain/errors.js";
+import { DomainError, resourceNotFound } from "../domain/errors.js";
 import type { Actor } from "../domain/types.js";
 
 /**
  * Subject for `resource:view`. `departmentId: null` means "every department"
- * (an unscoped listing), which only admins may request.
+ * (an unscoped listing), which only admins may request. `id` is present when
+ * the subject is a concrete resource rather than a listing scope.
  */
 export interface ResourceViewSubject {
+  id?: string;
   departmentId: string | null;
 }
 
-/** Subject for `resource:manage`. A resource being created has no owners yet. */
+/** Subject for `resource:manage`. A resource being created has no id or owners yet. */
 export interface ResourceManageSubject {
+  id?: string;
   departmentId: string;
   ownerIds: readonly string[];
 }
@@ -69,13 +72,16 @@ export function defaultResourceScope(actor: Actor): ResourceViewSubject {
 }
 
 /**
- * The error to raise after `can()` returned false. Cross-department denials
- * get WRONG_DEPARTMENT so clients can tell scoping apart from missing rights.
+ * The error to raise after `can()` returned false.
+ *
+ * A concrete resource outside the actor's visible departments is reported
+ * exactly like a missing row (404 NOT_FOUND), so the API never confirms it
+ * exists (CLAUDE.md §2c). Everything else is FORBIDDEN. WRONG_DEPARTMENT is
+ * reserved for a later phase: acting on a resource the actor *can* see.
  */
 export function denial<A extends Action>(actor: Actor, action: A, subject: PolicySubjects[A]): DomainError {
-  const departmentId = "departmentId" in subject ? subject.departmentId : undefined;
-  if (typeof departmentId === "string" && departmentId !== actor.departmentId && !isAdmin(actor)) {
-    return new DomainError("WRONG_DEPARTMENT", "You can only access resources in your own department");
+  if ("id" in subject && typeof subject.id === "string" && "departmentId" in subject) {
+    if (!can(actor, "resource:view", { departmentId: subject.departmentId })) return resourceNotFound();
   }
   return new DomainError("FORBIDDEN", `You are not allowed to perform ${action}`);
 }

@@ -1,4 +1,4 @@
-import { DomainError } from "../domain/errors.js";
+import { DomainError, resourceNotFound } from "../domain/errors.js";
 import type { Resource, User } from "../domain/types.js";
 import type { Repositories, UnitOfWork } from "../repositories/index.js";
 import type { ResourceFields, ResourceFilter } from "../repositories/resource.repository.js";
@@ -18,7 +18,7 @@ export class ResourceService {
 
   async get(id: string): Promise<Resource> {
     const resource = await this.uow.read.resources.findById(id);
-    if (!resource) throw new DomainError("RESOURCE_NOT_FOUND", "Resource not found");
+    if (!resource) throw resourceNotFound();
     return resource;
   }
 
@@ -37,7 +37,7 @@ export class ResourceService {
   update(id: string, patch: Partial<ResourceFields>): Promise<Resource> {
     return this.uow.transaction(async (repos) => {
       const current = await repos.resources.findById(id);
-      if (!current) throw new DomainError("RESOURCE_NOT_FOUND", "Resource not found");
+      if (!current) throw resourceNotFound();
       assertSlotBounds(
         patch.minSlotMinutes ?? current.minSlotMinutes,
         patch.maxSlotMinutes ?? current.maxSlotMinutes,

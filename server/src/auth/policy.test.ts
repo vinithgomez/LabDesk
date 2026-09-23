@@ -59,9 +59,24 @@ describe("policy: user:change_role", () => {
 });
 
 describe("policy: denial", () => {
-  it("reports cross-department denials as WRONG_DEPARTMENT", () => {
-    expect(denial(actor("student"), "resource:view", { departmentId: DEPT_B }).code).toBe("WRONG_DEPARTMENT");
-    expect(denial(actor("student"), "resource:manage", { departmentId: DEPT_A, ownerIds: [] }).code).toBe("FORBIDDEN");
+  it("hides concrete resources in other departments behind NOT_FOUND", () => {
+    const other = { id: "r-1", departmentId: DEPT_B, ownerIds: [] };
+    expect(denial(actor("student"), "resource:view", other).code).toBe("NOT_FOUND");
+    expect(denial(actor("faculty"), "resource:manage", other).code).toBe("NOT_FOUND");
+  });
+
+  it("uses FORBIDDEN for visible resources, listing scopes and everything else", () => {
+    const own = { id: "r-1", departmentId: DEPT_A, ownerIds: [] };
+    expect(denial(actor("student"), "resource:manage", own).code).toBe("FORBIDDEN");
+    expect(denial(actor("student"), "resource:view", { departmentId: DEPT_B }).code).toBe("FORBIDDEN");
+    expect(denial(actor("student"), "resource:manage", { departmentId: DEPT_B, ownerIds: [] }).code).toBe("FORBIDDEN");
     expect(denial(actor("student"), "user:change_role", { targetUserId: "x" }).code).toBe("FORBIDDEN");
+  });
+
+  it("never returns WRONG_DEPARTMENT in Phase 1", () => {
+    const subjects = [{ departmentId: DEPT_B }, { id: "r-1", departmentId: DEPT_B }, { departmentId: null }];
+    for (const s of subjects) {
+      expect(denial(actor("student"), "resource:view", s).code).not.toBe("WRONG_DEPARTMENT");
+    }
   });
 });
