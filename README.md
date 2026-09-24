@@ -71,6 +71,29 @@ backends are idle inside open transactions and that no booking has been
 committed. The test then asserts exactly one `201`, 49 `409 SLOT_CONFLICT`
 responses, and one stored row for the slot.
 
+## Scheduled jobs
+
+`npm run dev` / `npm start` schedule these with node-cron (`JOBS_ENABLED=false`
+turns them off). Every instance schedules them; a Redis lock
+(`lock:<job-name>`) makes exactly one instance run each tick, and every job is
+idempotent.
+
+| Job | Schedule | Does |
+|---|---|---|
+| `no-show-sweeper` | every 5 min | approved, never checked in, past start + 15 min → `no_show` |
+| `auto-complete` | every 15 min | checked in, never checked out, past end + 15 min → `completed` at the booked end |
+| `expire-lapsed-pending` | every 5 min | still pending at its start → `rejected` |
+| `waitlist-promoter` | every 5 min | books the oldest waiting entry whose period is now free |
+| `waitlist-expiry` | every 5 min | waiting entries whose desired start has arrived → `expired` |
+| `series-materializer` | 00:15 IST nightly | books each recurring series' occurrences out to the resource's booking horizon |
+
+Waitlist promotions and series occurrences are inserted through the same path
+as `POST /api/bookings`, so the exclusion constraint guards them too. A
+promoted booking is `pending` or `approved` by the resource's
+`requires_approval`, like any other. An occurrence that can't be booked
+(e.g. `SLOT_CONFLICT`) is skipped, not retried, and listed with its reason
+under `skipped` in `GET /api/series/:id`; the rest of the series is still booked.
+
 ## Backend layout (`server/src`)
 
 ```
