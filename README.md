@@ -12,7 +12,9 @@ See `CLAUDE.md` for the full specification.
 4. `npm run db:migrate` — apply migrations
 5. `npm run db:seed` — two departments (CSE, ECE), the bootstrap admin from
    `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`, demo faculty / lab in-charges /
-   students (password `SEED_USER_PASSWORD`) and resources in both departments
+   students (password `SEED_USER_PASSWORD`) and resources in both departments,
+   plus 8 weeks of demo booking history for the analytics dashboard (re-running
+   the seed adds nothing it already added)
 6. `npm run dev` — API on http://localhost:4000 (also runs the scheduled jobs)
 7. `cd ../client && npm install && npm run dev` — the PWA on http://localhost:5173,
    proxying `/api` to the API. `/scan` is the in-app QR scanner; a printed
@@ -70,6 +72,34 @@ and before any is released, a separate connection verifies that 50 distinct
 backends are idle inside open transactions and that no booking has been
 committed. The test then asserts exactly one `201`, 49 `409 SLOT_CONFLICT`
 responses, and one stored row for the slot.
+
+## Analytics
+
+`/analytics` in the PWA (faculty, lab in-charges and admins), backed by
+`GET /api/analytics/{utilization,no-shows,heatmap,idle-ranking}`. Every figure
+is computed in PostgreSQL. Each endpoint takes `from`/`to` (default: the last
+4 weeks, clipped to now), `resourceId`, and `departmentId` (default: your own
+department; only an admin may name another, or `all`).
+
+- **Utilization** = in-hours checked-in minutes ÷ available minutes, so it
+  never exceeds 100%. Available minutes come from each resource's own
+  `business_hours_start`/`_end` on its `business_days` (IST; default
+  08:00–18:00, Mon–Fri), counted from when the resource was created. Checked-in
+  time outside those hours, or on any other day, is reported separately as
+  `offHoursMinutes` and never enters the ratio; overlapping sessions are merged,
+  so no minute counts twice. Booked minutes exclude cancelled and rejected
+  (which includes expired) bookings. Everything is clipped to the window;
+  sessions still open aren't counted, and auto-completed ones are, reported
+  separately.
+- **No-show rate** = no-shows ÷ (no-shows + completed + checked in). Rejected,
+  expired, cancelled and undecided bookings are not attendance outcomes and
+  never affect it.
+- **Heatmap**: booked minutes per IST day-of-week × hour, all 168 cells
+  present (zeros included); a booking counts in every hour it touches.
+- **Idle ranking**: least used first. A resource needs 28 days observed in the
+  window (from its creation, if later) to be ranked; inactive resources, those
+  with less data, and those with no open hours are listed as excluded, with
+  the reason.
 
 ## Scheduled jobs
 
