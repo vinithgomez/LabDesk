@@ -152,11 +152,11 @@ describe("idempotency: a second run on the same data changes nothing", () => {
     ids.push(await booking(status === "checked_in" ? "approved" : status, 2 * 60 * MIN)); // not yet due
     clock.set(at(runAfter));
 
-    const first = await job(name).run(h.services.bookings);
+    const first = await job(name).run(h.services);
     expect(first).toMatchObject({ changed: 1, failed: 0 });
     const afterFirst = await snapshot();
 
-    const second = await job(name).run(h.services.bookings);
+    const second = await job(name).run(h.services);
     expect(second).toEqual({ candidates: 0, changed: 0, skipped: 0, failed: 0 });
     expect(await snapshot()).toEqual(afterFirst);
   });
@@ -182,7 +182,7 @@ describe("Redis job lock", () => {
       },
     };
 
-    const runs = [runLockedJob(h.redis, gated, h.services.bookings), runLockedJob(h.redis, gated, h.services.bookings)];
+    const runs = [runLockedJob(h.redis, gated, h.services), runLockedJob(h.redis, gated, h.services)];
     const loser = await Promise.race(runs);
     expect(loser).toEqual({ ran: false });
     expect(await h.redis.get(jobLockKey(sweeper.name))).toMatch(/^[0-9a-f-]{36}$/); // held by the winner
@@ -199,9 +199,9 @@ describe("Redis job lock", () => {
 
   it("recovers when a crashed holder's lock expires", async () => {
     await h.redis.set(jobLockKey("no-show-sweeper"), "crashed-run", "PX", 200);
-    expect(await runLockedJob(h.redis, job("no-show-sweeper"), h.services.bookings)).toEqual({ ran: false });
+    expect(await runLockedJob(h.redis, job("no-show-sweeper"), h.services)).toEqual({ ran: false });
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(await runLockedJob(h.redis, job("no-show-sweeper"), h.services.bookings)).toMatchObject({ ran: true });
+    expect(await runLockedJob(h.redis, job("no-show-sweeper"), h.services)).toMatchObject({ ran: true });
   });
 
   it("never releases a lock another run has since acquired", async () => {

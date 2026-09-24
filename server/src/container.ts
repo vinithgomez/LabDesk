@@ -9,6 +9,7 @@ import { CheckinService } from "./services/checkin.service.js";
 import { DepartmentService } from "./services/department.service.js";
 import { ResourceService } from "./services/resource.service.js";
 import { UserService } from "./services/user.service.js";
+import { WaitlistService } from "./services/waitlist.service.js";
 
 export interface Services {
   auth: AuthService;
@@ -17,6 +18,7 @@ export interface Services {
   resources: ResourceService;
   bookings: BookingService;
   checkins: CheckinService;
+  waitlist: WaitlistService;
 }
 
 export interface ServiceOverrides {
@@ -38,12 +40,15 @@ export function createServices(prisma: PrismaClient, config: AppConfig, override
   });
   const passwords = createPasswordHasher(config.bcryptRounds);
 
+  const bookings = new BookingService(uow, clock);
+
   return {
     auth: new AuthService(uow, passwords, tokens, config.refreshTokenTtlSeconds),
     departments: new DepartmentService(uow),
     users: new UserService(uow),
     resources: new ResourceService(uow),
-    bookings: new BookingService(uow, clock),
+    bookings,
     checkins: new CheckinService(uow, config.publicAppUrl, clock),
+    waitlist: new WaitlistService(uow, bookings, clock),
   };
 }

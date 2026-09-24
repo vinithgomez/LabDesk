@@ -16,7 +16,7 @@ const app = createApp({ config, logger, services, redis });
 
 // Every instance schedules the jobs; the Redis lock makes exactly one run.
 const stopScheduler = config.jobsEnabled
-  ? startScheduler({ redis, bookings: services.bookings, logger })
+  ? startScheduler({ redis, services, logger })
   : async () => undefined;
 
 const server = app.listen(config.port, () => {
