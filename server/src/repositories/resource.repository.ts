@@ -17,16 +17,41 @@ const resourceSelect = {
   minSlotMinutes: true,
   maxSlotMinutes: true,
   bookingHorizonDays: true,
+  businessHoursStart: true,
+  businessHoursEnd: true,
+  businessDays: true,
   isActive: true,
   createdAt: true,
   updatedAt: true,
   owners: { select: { userId: true, approvalLevel: true }, orderBy: [{ approvalLevel: "asc" }, { userId: "asc" }] },
 } satisfies Prisma.ResourceSelect;
 
-type ResourceRow = Omit<Resource, "ownerIds">;
+type ResourceRow = Prisma.ResourceGetPayload<{ select: typeof resourceSelect }>;
 
-function toResource(row: ResourceRow): Resource {
-  return { ...row, ownerIds: row.owners.map((o) => o.userId) };
+/**
+ * Postgres `time` columns reach Prisma as a Date on 1970-01-01 (UTC). The
+ * domain uses "HH:MM"; these convert at the boundary, in UTC, so no timezone
+ * ever touches a wall-clock time.
+ */
+const fromTimeColumn = (d: Date): string => d.toISOString().slice(11, 16);
+const toTimeColumn = (hhmm: string): Date => new Date(`1970-01-01T${hhmm}:00.000Z`);
+
+function toResource({ businessHoursStart, businessHoursEnd, ...row }: ResourceRow): Resource {
+  return {
+    ...row,
+    businessHoursStart: fromTimeColumn(businessHoursStart),
+    businessHoursEnd: fromTimeColumn(businessHoursEnd),
+    ownerIds: row.owners.map((o) => o.userId),
+  };
+}
+
+/** Domain fields -> Prisma data, converting the business-hours times. */
+function toColumns<F extends Partial<ResourceFields>>({ businessHoursStart, businessHoursEnd, ...rest }: F) {
+  return {
+    ...rest,
+    ...(businessHoursStart !== undefined && { businessHoursStart: toTimeColumn(businessHoursStart) }),
+    ...(businessHoursEnd !== undefined && { businessHoursEnd: toTimeColumn(businessHoursEnd) }),
+  };
 }
 
 export interface ResourceFields {
@@ -40,6 +65,9 @@ export interface ResourceFields {
   minSlotMinutes: number;
   maxSlotMinutes: number;
   bookingHorizonDays: number;
+  businessHoursStart: string;
+  businessHoursEnd: string;
+  businessDays: number[];
   isActive: boolean;
 }
 
@@ -110,7 +138,7 @@ export class ResourceWriter extends ResourceReader {
   async create(departmentId: string, fields: ResourceFields, owners: readonly ResourceOwner[]): Promise<Resource> {
     const row = await this.tx.resource.create({
       data: {
-        ...fields,
+        ...toColumns(fields),
         departmentId,
         owners: { create: owners.map((o) => ({ userId: o.userId, approvalLevel: o.approvalLevel })) },
       },
@@ -152,7 +180,7 @@ export class ResourceWriter extends ResourceReader {
   }
 
   async update(id: string, patch: Partial<ResourceFields>): Promise<Resource> {
-    const row = await this.tx.resource.update({ where: { id }, data: patch, select: resourceSelect });
+    const row = await this.tx.resource.update({ where: { id }, data: toColumns(patch), select: resourceSelect });
     return toResource(row);
   }
 }

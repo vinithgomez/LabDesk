@@ -13,6 +13,8 @@ import { idParams } from "./schemas.js";
 
 // ---- Request schemas ------------------------------------------------------
 
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
 const resourceFields = {
   name: z.string().trim().min(1).max(120),
   type: z.enum(RESOURCE_TYPES),
@@ -25,6 +27,15 @@ const resourceFields = {
   // Same-day bookings only (CLAUDE.md §2b), so a slot can never exceed a day.
   maxSlotMinutes: z.number().int().min(1).max(1440),
   bookingHorizonDays: z.number().int().min(1).max(365),
+  /** IST wall-clock opening hours used for utilization, "HH:MM", start < end. */
+  businessHoursStart: z.string().regex(HHMM, "must be HH:MM (24-hour)"),
+  businessHoursEnd: z.string().regex(HHMM, "must be HH:MM (24-hour)"),
+  /** Open days, 0 = Sunday .. 6 = Saturday. */
+  businessDays: z
+    .array(z.number().int().min(0).max(6))
+    .max(7)
+    .refine((days) => new Set(days).size === days.length, "business days must not repeat")
+    .transform((days) => [...days].sort((a, b) => a - b)),
   isActive: z.boolean(),
 };
 
@@ -50,6 +61,9 @@ export const createResourceBody = z
     minSlotMinutes: resourceFields.minSlotMinutes.default(30),
     maxSlotMinutes: resourceFields.maxSlotMinutes.default(180),
     bookingHorizonDays: resourceFields.bookingHorizonDays.default(14),
+    businessHoursStart: resourceFields.businessHoursStart.default("08:00"),
+    businessHoursEnd: resourceFields.businessHoursEnd.default("18:00"),
+    businessDays: resourceFields.businessDays.default([1, 2, 3, 4, 5]),
     isActive: resourceFields.isActive.default(true),
     owners: z.array(ownerInput).max(20).default([]),
   })
@@ -96,6 +110,9 @@ export const resourceDto = z.object({
   minSlotMinutes: z.number(),
   maxSlotMinutes: z.number(),
   bookingHorizonDays: z.number(),
+  businessHoursStart: z.string(),
+  businessHoursEnd: z.string(),
+  businessDays: z.array(z.number()),
   isActive: z.boolean(),
   ownerIds: z.array(z.string()),
   owners: z.array(z.object({ userId: z.string(), approvalLevel: z.number() })),

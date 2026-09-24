@@ -34,6 +34,7 @@ export class ResourceService {
     input: { departmentId: string; fields: ResourceFields; owners: ResourceOwner[] },
   ): Promise<Resource> {
     assertSlotBounds(input.fields.minSlotMinutes, input.fields.maxSlotMinutes);
+    assertBusinessHours(input.fields.businessHoursStart, input.fields.businessHoursEnd);
     assertUniqueOwners(input.owners);
 
     return this.uow.transaction(async (tx) => {
@@ -100,6 +101,7 @@ export class ResourceService {
       if (!before) throw resourceNotFound();
       const merged = { ...before, ...patch };
       assertSlotBounds(merged.minSlotMinutes, merged.maxSlotMinutes);
+      assertBusinessHours(merged.businessHoursStart, merged.businessHoursEnd);
       // Approval settings can't be changed into a state the current owners
       // can't serve (e.g. requiring approval with no owners, or a second
       // level nobody owns).
@@ -110,6 +112,13 @@ export class ResourceService {
       await tx.writeAudit({ actorId: actor.id, entityType: "resource", entityId: id, action, before, after });
       return after;
     });
+  }
+}
+
+/** "HH:MM" strings compare correctly as text. The DB CHECK is the backstop. */
+function assertBusinessHours(start: string, end: string): void {
+  if (start >= end) {
+    throw new DomainError("INVALID_BUSINESS_HOURS", "businessHoursStart must be before businessHoursEnd");
   }
 }
 

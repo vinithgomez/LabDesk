@@ -57,6 +57,11 @@ export interface Resource {
   minSlotMinutes: number;
   maxSlotMinutes: number;
   bookingHorizonDays: number;
+  /** Open hours for utilization: IST wall-clock "HH:MM", start < end. */
+  businessHoursStart: string;
+  businessHoursEnd: string;
+  /** Days open, EXTRACT(dow) numbering: 0 = Sunday .. 6 = Saturday. */
+  businessDays: number[];
   isActive: boolean;
   /** Derived from `owners`; what most authorization checks need. */
   ownerIds: string[];

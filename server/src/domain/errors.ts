@@ -35,7 +35,9 @@ export type DomainErrorCode =
   | "SLOT_AVAILABLE"
   /** The user already has a waiting entry overlapping this period on this resource. */
   | "WAITLIST_DUPLICATE"
-  | "INVALID_RRULE";
+  | "INVALID_RRULE"
+  /** Business hours must open before they close (no wrap past midnight). */
+  | "INVALID_BUSINESS_HOURS";
 
 export class DomainError extends Error {
   constructor(

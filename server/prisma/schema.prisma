@@ -130,6 +130,11 @@ model Resource {
   minSlotMinutes     Int                 @default(30) @map("min_slot_minutes")
   maxSlotMinutes     Int                 @default(180) @map("max_slot_minutes")
   bookingHorizonDays Int                 @default(14) @map("booking_horizon_days")
+  // Open hours for utilization (IST wall-clock; days use 0 = Sunday). The
+  // start < end and 0..6 CHECKs live in the migration.
+  businessHoursStart DateTime            @default(dbgenerated("'08:00:00'::time without time zone")) @map("business_hours_start") @db.Time(0)
+  businessHoursEnd   DateTime            @default(dbgenerated("'18:00:00'::time without time zone")) @map("business_hours_end") @db.Time(0)
+  businessDays       Int[]               @default([1, 2, 3, 4, 5]) @map("business_days") @db.SmallInt
   isActive           Boolean             @default(true) @map("is_active")
   createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)

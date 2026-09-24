@@ -120,6 +120,13 @@ export interface ResourceFixture {
   minSlotMinutes?: number;
   maxSlotMinutes?: number;
   bookingHorizonDays?: number;
+  /** IST "HH:MM"; defaults to the schema's 08:00–18:00. */
+  businessHoursStart?: string;
+  businessHoursEnd?: string;
+  /** 0 = Sunday; defaults to Monday–Friday. */
+  businessDays?: number[];
+  /** Backdates the resource (analytics measures observation from here). */
+  createdAt?: Date;
 }
 
 /** Creates a resource directly. Defaults: capacity 30, 30–120 minute slots, 7-day horizon. */
@@ -134,6 +141,10 @@ export async function createResource(prisma: PrismaClient, f: ResourceFixture): 
       minSlotMinutes: f.minSlotMinutes ?? 30,
       maxSlotMinutes: f.maxSlotMinutes ?? 120,
       bookingHorizonDays: f.bookingHorizonDays ?? 7,
+      ...(f.businessHoursStart && { businessHoursStart: new Date(`1970-01-01T${f.businessHoursStart}:00.000Z`) }),
+      ...(f.businessHoursEnd && { businessHoursEnd: new Date(`1970-01-01T${f.businessHoursEnd}:00.000Z`) }),
+      ...(f.businessDays && { businessDays: f.businessDays }),
+      ...(f.createdAt && { createdAt: f.createdAt }),
       isActive: f.isActive ?? true,
       requiresApproval: f.requiresApproval ?? false,
       approvalLevels: f.approvalLevels ?? 1,
@@ -213,3 +224,19 @@ export async function insertBooking(
   return row.id;
 }
 
+
+/** Inserts a check-in row directly; `out` null leaves the session open. */
+export async function insertCheckin(
+  prisma: PrismaClient,
+  c: { bookingId: string; in: Date; out: Date | null; checkoutMethod?: "qr" | "manual_override" | "auto" },
+): Promise<void> {
+  await prisma.$executeRaw`
+    INSERT INTO checkins (booking_id, checked_in_at, checked_out_at, checkin_method, checkout_method)
+    VALUES (
+      ${c.bookingId}::uuid,
+      ${c.in.toISOString()}::timestamptz,
+      ${c.out?.toISOString() ?? null}::timestamptz,
+      'qr',
+      ${c.out ? (c.checkoutMethod ?? "qr") : null}::checkout_method
+    )`;
+}
