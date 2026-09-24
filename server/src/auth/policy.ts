@@ -10,7 +10,7 @@ import {
   seriesNotFound,
   waitlistEntryNotFound,
 } from "../domain/errors.js";
-import type { Actor, ApprovalInboxScope, BookingListScope, BookingStatus } from "../domain/types.js";
+import type { Actor, ApprovalInboxScope, BookingListScope, BookingStatus, UserRole } from "../domain/types.js";
 
 /**
  * Subject for `resource:view`. `departmentId: null` means "every department"
@@ -82,6 +82,16 @@ export interface SeriesSubject {
   resource: { id: string; departmentId: string; ownerIds: readonly string[] };
 }
 
+/**
+ * Subject for `analytics:view`: the department whose analytics are requested
+ * (null = every department). `id` is set when a single resource was named,
+ * so a resource outside the actor's departments reads as missing.
+ */
+export interface AnalyticsSubject {
+  id?: string;
+  departmentId: string | null;
+}
+
 export interface PolicySubjects {
   "resource:view": ResourceViewSubject;
   "resource:manage": ResourceManageSubject;
@@ -98,6 +108,7 @@ export interface PolicySubjects {
   "series:create": BookingCreateSubject;
   "series:view": SeriesSubject;
   "series:cancel": SeriesSubject;
+  "analytics:view": AnalyticsSubject;
 }
 
 export type Action = keyof PolicySubjects;
@@ -123,6 +134,9 @@ const ownsResource = (actor: Actor, r: { departmentId: string; ownerIds: readonl
  */
 const mayBook = (actor: Actor, r: BookingCreateSubject): boolean =>
   r.isActive && r.departmentId === actor.departmentId;
+
+/** §6 analytics:view: staff only. */
+const ANALYTICS_ROLES: readonly UserRole[] = ["faculty", "lab_incharge", "admin"];
 
 /** Once the user is in the room, only staff can end the booking early (§5, §6). */
 const BOOKER_CANNOT_CANCEL: readonly BookingStatus[] = ["checked_in", "completed"];
@@ -202,6 +216,11 @@ const rules: { [A in Action]: Rule<A> } = {
   // Cancelling only touches occurrences the state machine lets 'cancel'
   // leave, so the booker's "not once checked in" limit is enforced there.
   "series:cancel": (actor, s) => isAdmin(actor) || s.userId === actor.id || ownsResource(actor, s.resource),
+
+  // §6: faculty, lab_incharge, admin - department-scoped like everything
+  // else. Faculty and in-charges see their own department only; an admin may
+  // ask for another department or all of them (departmentId null).
+  "analytics:view": (actor, s) => ANALYTICS_ROLES.includes(actor.role) && canSeeDepartment(actor, s.departmentId),
 };
 
 export function can<A extends Action>(actor: Actor, action: A, subject: PolicySubjects[A]): boolean {
@@ -217,6 +236,15 @@ export function can<A extends Action>(actor: Actor, action: A, subject: PolicySu
  */
 export function defaultResourceScope(actor: Actor): ResourceViewSubject {
   return { departmentId: isAdmin(actor) ? null : actor.departmentId };
+}
+
+/**
+ * The department analytics cover when the caller names none: their own, for
+ * everyone - admins included. Unlike resource listings, an admin sees another
+ * department's (or every department's) analytics only by asking for it.
+ */
+export function defaultAnalyticsScope(actor: Actor): AnalyticsSubject {
+  return { departmentId: actor.departmentId };
 }
 
 /**
@@ -272,6 +300,16 @@ const denials: { [A in Action]?: Denial<A> } = {
   "waitlist:cancel": () => waitlistEntryNotFound(),
   "series:view": () => seriesNotFound(),
   "series:cancel": (actor, s) => (can(actor, "series:view", s) ? null : seriesNotFound()),
+  "analytics:view": (actor, s) => {
+    // A named resource outside the actor's departments doesn't exist for them.
+    const hidden = hiddenResource(actor, s);
+    if (hidden) return hidden;
+    if (!ANALYTICS_ROLES.includes(actor.role)) {
+      return new DomainError("FORBIDDEN", "Analytics are available to faculty, lab in-charges and admins");
+    }
+    // Department IDs are public, so another department is 403, not 404 (§2c).
+    return new DomainError("FORBIDDEN", "You can only view analytics for your own department");
+  },
   // A booking you may not see is indistinguishable from one that doesn't exist.
   "booking:view": () => bookingNotFound(),
   "booking:cancel": (actor, b) => (can(actor, "booking:view", b) ? null : bookingNotFound()),

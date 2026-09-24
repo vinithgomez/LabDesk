@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Actor, UserRole } from "../domain/types.js";
-import { approvalInboxScope, bookingListScope, can, denial } from "./policy.js";
+import { approvalInboxScope, bookingListScope, can, defaultAnalyticsScope, denial } from "./policy.js";
 
 const DEPT_A = "dept-a";
 const DEPT_B = "dept-b";
@@ -276,5 +276,32 @@ describe("policy: waitlist and series", () => {
     expect(denial(stranger, "series:cancel", series("someone")).code).toBe("NOT_FOUND");
     // A stale owner row in another department grants nothing (as for resources).
     expect(can(owner, "series:cancel", series("someone", DEPT_B))).toBe(false);
+  });
+});
+
+describe("policy: analytics:view", () => {
+  it("is staff-only, and never for students", () => {
+    for (const role of ["faculty", "lab_incharge", "admin"] as const) {
+      expect(can(actor(role), "analytics:view", { departmentId: DEPT_A })).toBe(true);
+    }
+    expect(can(actor("student"), "analytics:view", { departmentId: DEPT_A })).toBe(false);
+    expect(denial(actor("student"), "analytics:view", { departmentId: DEPT_A }).code).toBe("FORBIDDEN");
+  });
+
+  it("scopes staff to their own department; only admins may ask for another or for all", () => {
+    for (const role of ["faculty", "lab_incharge"] as const) {
+      expect(can(actor(role), "analytics:view", { departmentId: DEPT_B })).toBe(false);
+      expect(can(actor(role), "analytics:view", { departmentId: null })).toBe(false);
+      expect(denial(actor(role), "analytics:view", { departmentId: DEPT_B }).code).toBe("FORBIDDEN");
+      // A named resource in another department reads as missing.
+      expect(denial(actor(role), "analytics:view", { id: "r9", departmentId: DEPT_B }).code).toBe("NOT_FOUND");
+    }
+    expect(can(actor("admin"), "analytics:view", { departmentId: DEPT_B })).toBe(true);
+    expect(can(actor("admin"), "analytics:view", { departmentId: null })).toBe(true);
+  });
+
+  it("defaults everyone, admins included, to their own department", () => {
+    expect(defaultAnalyticsScope(actor("admin"))).toEqual({ departmentId: DEPT_A });
+    expect(defaultAnalyticsScope(actor("faculty", { departmentId: DEPT_B }))).toEqual({ departmentId: DEPT_B });
   });
 });
