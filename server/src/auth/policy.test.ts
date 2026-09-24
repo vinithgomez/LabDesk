@@ -224,3 +224,57 @@ describe("policy: check-in", () => {
     expect(denial(actor("student"), "checkin:override", booking("student-1")).code).toBe("FORBIDDEN");
   });
 });
+
+describe("policy: waitlist and series", () => {
+  const resource = { id: "r1", departmentId: DEPT_A, isActive: true };
+
+  it("joining a waitlist and creating a series follow booking:create exactly", () => {
+    const cases = [
+      { who: actor("student"), r: resource },
+      { who: actor("admin"), r: { ...resource, departmentId: DEPT_B } },
+      { who: actor("student"), r: { ...resource, isActive: false } },
+      { who: actor("faculty", { isActive: false }), r: resource },
+    ];
+    for (const { who, r } of cases) {
+      const expected = can(who, "booking:create", r);
+      expect(can(who, "waitlist:create", r)).toBe(expected);
+      expect(can(who, "series:create", r)).toBe(expected);
+      if (!expected) {
+        expect(denial(who, "waitlist:create", r).code).toBe(denial(who, "booking:create", r).code);
+        expect(denial(who, "series:create", r).code).toBe(denial(who, "booking:create", r).code);
+      }
+    }
+  });
+
+  it("only the owner may cancel a waitlist entry; anyone else is told it doesn't exist", () => {
+    const student = actor("student");
+    expect(can(student, "waitlist:cancel", { userId: student.id })).toBe(true);
+    for (const other of [actor("admin"), actor("lab_incharge")]) {
+      expect(can(other, "waitlist:cancel", { userId: student.id })).toBe(false);
+      expect(denial(other, "waitlist:cancel", { userId: student.id }).code).toBe("NOT_FOUND");
+    }
+  });
+
+  it("series:view and series:cancel match booking:view and booking:cancel", () => {
+    const owner = actor("lab_incharge", { id: "owner-1" });
+    const series = (userId: string, departmentId = DEPT_A) => ({
+      id: "s1",
+      userId,
+      resource: { id: "r1", departmentId, ownerIds: [owner.id] },
+    });
+    const allowed: [Actor, ReturnType<typeof series>][] = [
+      [actor("student"), series("student-1")], // own series
+      [owner, series("someone")], // resource owner
+      [actor("admin"), series("someone", DEPT_B)], // admin, any department, as for booking:cancel
+    ];
+    for (const [who, s] of allowed) {
+      expect(can(who, "series:view", s)).toBe(true);
+      expect(can(who, "series:cancel", s)).toBe(true);
+    }
+    const stranger = actor("faculty");
+    expect(can(stranger, "series:cancel", series("someone"))).toBe(false);
+    expect(denial(stranger, "series:cancel", series("someone")).code).toBe("NOT_FOUND");
+    // A stale owner row in another department grants nothing (as for resources).
+    expect(can(owner, "series:cancel", series("someone", DEPT_B))).toBe(false);
+  });
+});

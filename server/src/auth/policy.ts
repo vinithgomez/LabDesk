@@ -3,7 +3,13 @@
  * `can()` before invoking a mutating service; nothing else in the codebase
  * inspects `actor.role` to make an access decision.
  */
-import { bookingNotFound, DomainError, resourceNotFound } from "../domain/errors.js";
+import {
+  bookingNotFound,
+  DomainError,
+  resourceNotFound,
+  seriesNotFound,
+  waitlistEntryNotFound,
+} from "../domain/errors.js";
 import type { Actor, ApprovalInboxScope, BookingListScope, BookingStatus } from "../domain/types.js";
 
 /**
@@ -64,6 +70,18 @@ export interface CheckinSubject {
   bookingUserId: string;
 }
 
+/** Subject for `waitlist:cancel`: the entry's owner. */
+export interface WaitlistSubject {
+  userId: string;
+}
+
+/** Subject for `series:view` / `series:cancel`: a series and its resource. */
+export interface SeriesSubject {
+  id: string;
+  userId: string;
+  resource: { id: string; departmentId: string; ownerIds: readonly string[] };
+}
+
 export interface PolicySubjects {
   "resource:view": ResourceViewSubject;
   "resource:manage": ResourceManageSubject;
@@ -75,6 +93,11 @@ export interface PolicySubjects {
   "booking:approve": ApprovalSubject;
   "checkin:create": CheckinSubject;
   "checkin:override": BookingSubject;
+  "waitlist:create": BookingCreateSubject;
+  "waitlist:cancel": WaitlistSubject;
+  "series:create": BookingCreateSubject;
+  "series:view": SeriesSubject;
+  "series:cancel": SeriesSubject;
 }
 
 export type Action = keyof PolicySubjects;
@@ -90,6 +113,16 @@ const canSeeDepartment = (actor: Actor, departmentId: string | null): boolean =>
 /** Resource owner, pinned to the actor's own department (as for resource:manage). */
 const ownsResource = (actor: Actor, r: { departmentId: string; ownerIds: readonly string[] }): boolean =>
   r.departmentId === actor.departmentId && r.ownerIds.includes(actor.id);
+
+/**
+ * booking:create (§6): any active user; the resource must be active and in
+ * the actor's own department. This applies to admins too: seeing every
+ * department is not the same as booking in every department. Joining a
+ * waitlist and creating a series are both requests to be booked, so they use
+ * this rule unchanged.
+ */
+const mayBook = (actor: Actor, r: BookingCreateSubject): boolean =>
+  r.isActive && r.departmentId === actor.departmentId;
 
 /** Once the user is in the room, only staff can end the booking early (§5, §6). */
 const BOOKER_CANNOT_CANCEL: readonly BookingStatus[] = ["checked_in", "completed"];
@@ -110,10 +143,7 @@ const rules: { [A in Action]: Rule<A> } = {
   // demoting themselves could leave the system with no admin.
   "user:change_role": (actor, s) => isAdmin(actor) && s.targetUserId !== actor.id,
 
-  // Any active user; the resource must be active and in the actor's own
-  // department (§6). This applies to admins too: seeing every department is
-  // not the same as booking in every department.
-  "booking:create": (actor, r) => r.isActive && r.departmentId === actor.departmentId,
+  "booking:create": mayBook,
 
   // The booker, the resource's owners (who approve and manage it) and admins.
   "booking:view": (actor, b) => isAdmin(actor) || b.userId === actor.id || ownsResource(actor, b.resource),
@@ -154,6 +184,24 @@ const rules: { [A in Action]: Rule<A> } = {
     if (b.resource.departmentId !== actor.departmentId) return false;
     return isAdmin(actor) || ownsResource(actor, b.resource);
   },
+
+  // A waitlist entry is a booking request that waits: same rule as booking:create.
+  "waitlist:create": mayBook,
+
+  // Your own entries only. Nobody else holds a slot through your entry, so
+  // there is nothing for staff to reclaim.
+  "waitlist:cancel": (actor, e) => e.userId === actor.id,
+
+  // A series books its occurrences for the caller: same rule as booking:create.
+  "series:create": mayBook,
+
+  // As booking:view: the series owner, the resource's owners and admins.
+  "series:view": (actor, s) => isAdmin(actor) || s.userId === actor.id || ownsResource(actor, s.resource),
+
+  // As booking:cancel: the series owner, a resource owner, or an admin.
+  // Cancelling only touches occurrences the state machine lets 'cancel'
+  // leave, so the booker's "not once checked in" limit is enforced there.
+  "series:cancel": (actor, s) => isAdmin(actor) || s.userId === actor.id || ownsResource(actor, s.resource),
 };
 
 export function can<A extends Action>(actor: Actor, action: A, subject: PolicySubjects[A]): boolean {
@@ -202,20 +250,28 @@ type Denial<A extends Action> = (actor: Actor, subject: PolicySubjects[A]) => Do
 const hiddenResource = (actor: Actor, s: { id?: string; departmentId: string | null }): DomainError | null =>
   s.id !== undefined && !canSeeDepartment(actor, s.departmentId) ? resourceNotFound() : null;
 
+function bookingCreateDenial(actor: Actor, r: BookingCreateSubject): DomainError | null {
+  const hidden = hiddenResource(actor, r);
+  if (hidden) return hidden;
+  // Visible (admins see all departments) but not bookable from here (§2c).
+  if (r.departmentId !== actor.departmentId) {
+    return new DomainError("WRONG_DEPARTMENT", "You can only book resources in your own department");
+  }
+  if (!r.isActive) return new DomainError("FORBIDDEN", "This resource is not accepting bookings");
+  return null;
+}
+
 const denials: { [A in Action]?: Denial<A> } = {
   "resource:view": hiddenResource,
   "resource:manage": hiddenResource,
   "resource:manage_owners": hiddenResource,
-  "booking:create": (actor, r) => {
-    const hidden = hiddenResource(actor, r);
-    if (hidden) return hidden;
-    // Visible (admins see all departments) but not bookable from here (§2c).
-    if (r.departmentId !== actor.departmentId) {
-      return new DomainError("WRONG_DEPARTMENT", "You can only book resources in your own department");
-    }
-    if (!r.isActive) return new DomainError("FORBIDDEN", "This resource is not accepting bookings");
-    return null;
-  },
+  "booking:create": bookingCreateDenial,
+  "waitlist:create": bookingCreateDenial,
+  "series:create": bookingCreateDenial,
+  // Someone else's entry is indistinguishable from a missing one.
+  "waitlist:cancel": () => waitlistEntryNotFound(),
+  "series:view": () => seriesNotFound(),
+  "series:cancel": (actor, s) => (can(actor, "series:view", s) ? null : seriesNotFound()),
   // A booking you may not see is indistinguishable from one that doesn't exist.
   "booking:view": () => bookingNotFound(),
   "booking:cancel": (actor, b) => (can(actor, "booking:view", b) ? null : bookingNotFound()),
