@@ -30,7 +30,12 @@ export type DomainErrorCode =
   | "OWNER_REQUIRED"
   | "INVALID_QR"
   | "NO_ACTIVE_BOOKING"
-  | "RATE_LIMITED";
+  | "RATE_LIMITED"
+  /** Waitlist join for a slot nobody holds: book it directly instead. */
+  | "SLOT_AVAILABLE"
+  /** The user already has a waiting entry overlapping this period on this resource. */
+  | "WAITLIST_DUPLICATE"
+  | "INVALID_RRULE";
 
 export class DomainError extends Error {
   constructor(
@@ -55,4 +60,13 @@ export function resourceNotFound(): DomainError {
 /** Same rule for bookings: missing and not-visible-to-you look identical. */
 export function bookingNotFound(): DomainError {
   return new DomainError("NOT_FOUND", "Booking not found");
+}
+
+/** Waitlist entries are private to their owner; anyone else's looks missing. */
+export function waitlistEntryNotFound(): DomainError {
+  return new DomainError("NOT_FOUND", "Waitlist entry not found");
+}
+
+export function seriesNotFound(): DomainError {
+  return new DomainError("NOT_FOUND", "Series not found");
 }

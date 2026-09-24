@@ -56,6 +56,22 @@ enum CheckoutMethod {
   @@map("checkout_method")
 }
 
+enum SeriesStatus {
+  active
+  cancelled
+
+  @@map("series_status")
+}
+
+enum WaitlistStatus {
+  waiting
+  promoted
+  expired
+  cancelled
+
+  @@map("waitlist_status")
+}
+
 enum ResourceType {
   lab
   room
@@ -93,6 +109,8 @@ model User {
   checkinsOverridden        Checkin[]           @relation("CheckinOverriddenBy")
   checkoutsOverridden       Checkin[]           @relation("CheckoutOverriddenBy")
   maintenanceWindowsCreated MaintenanceWindow[]
+  bookingSeries             BookingSeries[]
+  waitlistEntries           WaitlistEntry[]
 
   @@index([departmentId])
   @@map("users")
@@ -119,6 +137,8 @@ model Resource {
   owners             ResourceOwner[]
   bookings           Booking[]
   maintenanceWindows MaintenanceWindow[]
+  bookingSeries      BookingSeries[]
+  waitlistEntries    WaitlistEntry[]
 
   @@index([departmentId])
   @@map("resources")
@@ -189,18 +209,21 @@ model Booking {
   status         BookingStatus            @default(pending)
   purpose        String                   @default("")
   attendeeCount  Int                      @default(1) @map("attendee_count")
-  // FK to booking_series is added with that table in Phase 5.
+  // Set on bookings materialized from a recurring series.
   seriesId       String?                  @map("series_id") @db.Uuid
   idempotencyKey String?                  @map("idempotency_key")
   createdAt      DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime                 @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   resource       Resource                 @relation(fields: [resourceId], references: [id], onDelete: Restrict)
   user           User                     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  series         BookingSeries?           @relation(fields: [seriesId], references: [id], onDelete: Restrict)
   approvals      BookingApproval[]
   checkin        Checkin?
+  waitlistEntry  WaitlistEntry?
 
   @@index([resourceId])
   @@index([userId])
+  @@index([seriesId])
   @@map("bookings")
 }
 
@@ -262,4 +285,75 @@ model Checkin {
   checkoutOverrider    User?           @relation("CheckoutOverriddenBy", fields: [checkoutOverriddenBy], references: [id], onDelete: Restrict)
 
   @@map("checkins")
+}
+
+// A recurring booking (CLAUDE.md §4 booking_series). rrule is the RFC 5545
+// subset FREQ=WEEKLY;BYDAY=...;UNTIL=...; start_time is an IST wall-clock
+// time. Occurrences are materialized as ordinary bookings (series_id set),
+// through the normal insert path, up to the resource's booking horizon.
+// Beyond §4: purpose / attendee_count (copied onto every occurrence), status
+// and cancelled_at, and materialized_through — the start of the last
+// occurrence the materializer processed (booked or skipped), so a run never
+// revisits an occurrence.
+model BookingSeries {
+  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  resourceId          String              @map("resource_id") @db.Uuid
+  userId              String              @map("user_id") @db.Uuid
+  rrule               String
+  startTime           DateTime            @map("start_time") @db.Time(0)
+  durationMinutes     Int                 @map("duration_minutes")
+  purpose             String              @default("")
+  attendeeCount       Int                 @default(1) @map("attendee_count")
+  status              SeriesStatus        @default(active)
+  materializedThrough DateTime?           @map("materialized_through") @db.Timestamptz(6)
+  cancelledAt         DateTime?           @map("cancelled_at") @db.Timestamptz(6)
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  resource            Resource            @relation(fields: [resourceId], references: [id], onDelete: Restrict)
+  user                User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  bookings            Booking[]
+  skips               BookingSeriesSkip[]
+
+  @@index([resourceId])
+  @@index([userId])
+  @@map("booking_series")
+}
+
+// An occurrence the materializer could not book (e.g. SLOT_CONFLICT), kept so
+// GET /api/series/:id can say which dates are missing and why. Skipped
+// occurrences are not retried.
+model BookingSeriesSkip {
+  id         String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seriesId   String                   @map("series_id") @db.Uuid
+  occurrence Unsupported("tstzrange")
+  reason     String
+  message    String
+  createdAt  DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  series     BookingSeries            @relation(fields: [seriesId], references: [id], onDelete: Restrict)
+
+  @@index([seriesId])
+  @@map("booking_series_skips")
+}
+
+// A request to be booked into a held slot if it frees (CLAUDE.md §4). Beyond
+// §4: purpose / attendee_count (carried onto the promoted booking, which is
+// validated exactly like any other) and booking_id (the booking a promoted
+// entry became). One 'waiting' entry per user per overlapping period on a
+// resource (exclusion constraint in the migration).
+model WaitlistEntry {
+  id            String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  resourceId    String                   @map("resource_id") @db.Uuid
+  userId        String                   @map("user_id") @db.Uuid
+  desiredPeriod Unsupported("tstzrange") @map("desired_period")
+  purpose       String                   @default("")
+  attendeeCount Int                      @default(1) @map("attendee_count")
+  status        WaitlistStatus           @default(waiting)
+  bookingId     String?                  @unique @map("booking_id") @db.Uuid
+  createdAt     DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime                 @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  resource      Resource                 @relation(fields: [resourceId], references: [id], onDelete: Restrict)
+  user          User                     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  booking       Booking?                 @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@map("waitlist_entries")
 }

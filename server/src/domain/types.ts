@@ -142,3 +142,58 @@ export interface Checkin {
   checkoutMethod: CheckoutMethod | null;
   checkoutOverriddenBy: string | null;
 }
+
+export const WAITLIST_STATUSES = ["waiting", "promoted", "expired", "cancelled"] as const;
+export type WaitlistStatus = (typeof WAITLIST_STATUSES)[number];
+
+/**
+ * A request to be booked into a held slot if it frees (CLAUDE.md §4
+ * waitlist_entries). `desired_period` is [startsAt, endsAt). `bookingId` is
+ * the booking a promoted entry became.
+ */
+export interface WaitlistEntry {
+  id: string;
+  resourceId: string;
+  userId: string;
+  startsAt: Date;
+  endsAt: Date;
+  purpose: string;
+  attendeeCount: number;
+  status: WaitlistStatus;
+  bookingId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export const SERIES_STATUSES = ["active", "cancelled"] as const;
+export type SeriesStatus = (typeof SERIES_STATUSES)[number];
+
+/** A recurring booking (CLAUDE.md §4 booking_series). */
+export interface BookingSeries {
+  id: string;
+  resourceId: string;
+  userId: string;
+  /** Normalized RFC 5545 subset: FREQ=WEEKLY;BYDAY=...;UNTIL=... */
+  rrule: string;
+  /** IST wall-clock start, "HH:MM". */
+  startTime: string;
+  durationMinutes: number;
+  purpose: string;
+  attendeeCount: number;
+  status: SeriesStatus;
+  /** Start of the last occurrence the materializer processed (booked or skipped). */
+  materializedThrough: Date | null;
+  cancelledAt: Date | null;
+  createdAt: Date;
+}
+
+/** An occurrence the materializer could not book, and why (a DomainError code). */
+export interface SeriesSkip {
+  id: string;
+  seriesId: string;
+  startsAt: Date;
+  endsAt: Date;
+  reason: string;
+  message: string;
+  createdAt: Date;
+}

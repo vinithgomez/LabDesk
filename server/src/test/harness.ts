@@ -66,7 +66,7 @@ export function testConfig(databaseUrl: string): AppConfig {
 
 export async function resetDatabase(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "audit_log", "checkins", "booking_approvals", "bookings", "maintenance_windows", "refresh_tokens", "resource_owners", "resources", "users", "departments" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "audit_log", "waitlist_entries", "booking_series_skips", "checkins", "booking_approvals", "bookings", "booking_series", "maintenance_windows", "refresh_tokens", "resource_owners", "resources", "users", "departments" RESTART IDENTITY CASCADE',
   );
 }
 

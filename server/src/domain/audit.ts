@@ -4,7 +4,7 @@
  * only available inside a unit-of-work transaction.
  */
 
-export type AuditEntityType = "user" | "resource" | "booking";
+export type AuditEntityType = "user" | "resource" | "booking" | "waitlist_entry" | "booking_series";
 
 export type AuditAction =
   | "user.role_changed"
@@ -23,7 +23,14 @@ export type AuditAction =
   | "booking.checkout_overridden"
   | "booking.no_show"
   | "booking.auto_completed"
-  | "booking.expired";
+  | "booking.expired"
+  | "waitlist.joined"
+  | "waitlist.promoted"
+  | "waitlist.expired"
+  | "waitlist.cancelled"
+  | "series.created"
+  | "series.cancelled"
+  | "series.occurrence_skipped";
 
 export interface AuditEntry {
   /** null is reserved for system actors (scheduled jobs in later phases). */
