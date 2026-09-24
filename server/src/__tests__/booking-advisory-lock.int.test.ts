@@ -75,6 +75,7 @@ describe("per-resource booking advisory lock", () => {
           purpose: "",
           attendeeCount: 1,
           idempotencyKey: null,
+          seriesId: null,
         });
         heldDuringTransaction = await advisoryLocksHeld();
         keyDuringTransaction = await heldAdvisoryKey();

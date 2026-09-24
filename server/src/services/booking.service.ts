@@ -1,3 +1,4 @@
+import { can } from "../auth/policy.js";
 import { approvalProgress, isStalled, type ApprovalProgress } from "../domain/approvals.js";
 import type { AuditAction } from "../domain/audit.js";
 import { assertBookableSlot } from "../domain/booking-rules.js";
@@ -22,6 +23,7 @@ import type {
   Checkin,
   CheckinMethod,
   Resource,
+  User,
 } from "../domain/types.js";
 import type { BookingListFilter, HeldSlot } from "../repositories/booking.repository.js";
 import { IDEMPOTENCY_INDEX } from "../repositories/booking.repository.js";
@@ -38,6 +40,22 @@ export interface CreateBookingInput {
   purpose: string;
   attendeeCount: number;
   idempotencyKey: string;
+}
+
+/**
+ * Everything the shared insert path needs. `userId` is the booker: the
+ * caller for POST /api/bookings, the entry's owner for a waitlist promotion,
+ * the series' owner for a materialized occurrence.
+ */
+export interface BookingInsertRequest {
+  resourceId: string;
+  userId: string;
+  startsAt: Date;
+  endsAt: Date;
+  purpose: string;
+  attendeeCount: number;
+  idempotencyKey: string | null;
+  seriesId: string | null;
 }
 
 export interface CreateBookingResult {
@@ -130,7 +148,7 @@ const TRANSITIONS: Record<BookingAction, { from: readonly BookingStatus[]; to: B
 };
 
 /** What one scheduled-job run did. A second run on unchanged data reports changed: 0. */
-export interface JobResult {
+export type JobResult = {
   /** Rows the eligibility query returned. */
   candidates: number;
   /** Rows actually transitioned. */
@@ -139,10 +157,10 @@ export interface JobResult {
   skipped: number;
   /** Candidates whose transition failed unexpectedly (logged, not retried). */
   failed: number;
-}
+};
 
 /** Upper bound on rows one job run processes; the next run picks up the rest. */
-const JOB_BATCH_SIZE = 500;
+export const JOB_BATCH_SIZE = 500;
 
 /** SQLSTATE 23P01 — exclusion_violation. */
 const EXCLUSION_VIOLATION = "23P01";
@@ -172,46 +190,7 @@ export class BookingService {
         const prior = await tx.bookings.findByIdempotencyKey(actor.id, input.idempotencyKey);
         if (prior) return replayOf(prior, input);
 
-        // SHARE lock: concurrent bookings proceed together, while anything that
-        // changes bookability (deactivation, and Phase 7's maintenance-window
-        // creation) takes FOR UPDATE and so serializes against this transaction.
-        await tx.resources.lockForShare(input.resourceId);
-        const resource = await tx.resources.findById(input.resourceId);
-        if (!resource) throw resourceNotFound();
-        if (!resource.isActive) throw new DomainError("FORBIDDEN", "This resource is not accepting bookings");
-
-        assertBookableSlot(resource, input, this.now());
-
-        const windows = await tx.maintenance.overlapping(resource.id, input.startsAt, input.endsAt);
-        if (windows.length > 0) {
-          throw new DomainError("MAINTENANCE_BLOCKED", "That time overlaps a maintenance window for this resource");
-        }
-
-        let booking: Booking;
-        try {
-          booking = await tx.bookings.insert({
-            // Resources that don't require approval skip the pending state.
-            initialStatus: resource.requiresApproval ? "pending" : "approved",
-            resourceId: resource.id,
-            userId: actor.id,
-            startsAt: input.startsAt,
-            endsAt: input.endsAt,
-            purpose: input.purpose,
-            attendeeCount: input.attendeeCount,
-            idempotencyKey: input.idempotencyKey,
-          });
-        } catch (err) {
-          throw toSlotConflict(err);
-        }
-
-        await tx.writeAudit({
-          actorId: actor.id,
-          entityType: "booking",
-          entityId: booking.id,
-          action: "booking.created",
-          before: null,
-          after: booking,
-        });
+        const booking = await this.insertInTx(tx, { ...input, userId: actor.id, seriesId: null }, actor.id);
         return { booking, replayed: false };
       });
     } catch (err) {
@@ -225,6 +204,63 @@ export class BookingService {
       }
       throw err;
     }
+  }
+
+  /**
+   * The one booking-insert path. POST /api/bookings, waitlist promotion and
+   * series materialization all come through here, so every booking, however
+   * it was created, passes the same checks and reaches the database the same
+   * way: resource re-check under a SHARE lock, slot rules, maintenance
+   * windows, then BookingWriter.insert (advisory lock + INSERT). Overlap with
+   * other bookings is never pre-checked; the exclusion constraint rejects it
+   * at INSERT (23P01 -> SLOT_CONFLICT), which aborts the caller's transaction.
+   *
+   * Authorization is the caller's job: the route's can() for a user's own
+   * request, assertMayBook() for bookings created on a user's behalf.
+   */
+  async insertInTx(tx: TxRepositories, req: BookingInsertRequest, auditActorId: string | null): Promise<Booking> {
+    // SHARE lock: concurrent bookings proceed together, while anything that
+    // changes bookability (deactivation, and Phase 7's maintenance-window
+    // creation) takes FOR UPDATE and so serializes against this transaction.
+    await tx.resources.lockForShare(req.resourceId);
+    const resource = await tx.resources.findById(req.resourceId);
+    if (!resource) throw resourceNotFound();
+    if (!resource.isActive) throw new DomainError("FORBIDDEN", "This resource is not accepting bookings");
+
+    assertBookableSlot(resource, req, this.now());
+
+    const windows = await tx.maintenance.overlapping(resource.id, req.startsAt, req.endsAt);
+    if (windows.length > 0) {
+      throw new DomainError("MAINTENANCE_BLOCKED", "That time overlaps a maintenance window for this resource");
+    }
+
+    let booking: Booking;
+    try {
+      booking = await tx.bookings.insert({
+        // Resources that don't require approval skip the pending state.
+        initialStatus: resource.requiresApproval ? "pending" : "approved",
+        resourceId: resource.id,
+        userId: req.userId,
+        startsAt: req.startsAt,
+        endsAt: req.endsAt,
+        purpose: req.purpose,
+        attendeeCount: req.attendeeCount,
+        idempotencyKey: req.idempotencyKey,
+        seriesId: req.seriesId,
+      });
+    } catch (err) {
+      throw toSlotConflict(err);
+    }
+
+    await tx.writeAudit({
+      actorId: auditActorId,
+      entityType: "booking",
+      entityId: booking.id,
+      action: "booking.created",
+      before: null,
+      after: booking,
+    });
+    return booking;
   }
 
   async get(id: string): Promise<BookingView> {
@@ -313,31 +349,49 @@ export class BookingService {
     actor: Actor | null,
     input?: DecisionInput | AttendanceInput,
   ): Promise<Booking> {
-    const rule = TRANSITIONS[action];
-    return this.uow.transaction(async (tx) => {
-      await tx.bookings.lockById(bookingId);
-      const before = await tx.bookings.findById(bookingId);
-      if (!before) throw bookingNotFound();
-      if (!rule.from.includes(before.status)) {
-        throw new DomainError("INVALID_TRANSITION", `Cannot ${action} a booking that is ${before.status}`);
-      }
-      const step = { tx, before, to: rule.to, now: this.now() };
+    return this.uow.transaction((tx) => this.transitionWithin(tx, bookingId, action, actor, input));
+  }
 
-      switch (action) {
-        case "cancel":
-          return this.applyCancel(step, requireActor(actor, action));
-        case "approve":
-        case "reject":
-          return this.applyDecision(step, action, requireActor(actor, action), requireDecision(input, action));
-        case "checkin":
-        case "checkout":
-          return this.applyAttendance(step, action, requireActor(actor, action), requireAttendance(input, action));
-        case "no_show":
-        case "auto_complete":
-        case "expire":
-          return this.applySystem(step, action);
-      }
-    });
+  /**
+   * transitionBooking's 'cancel', inside a caller's transaction, so that
+   * cancelling a series cancels all its eligible occurrences atomically. Same
+   * state machine, row lock and audit row; the caller must have passed a
+   * can() check that covers booking:cancel for these bookings (series:cancel).
+   */
+  cancelWithin(tx: TxRepositories, bookingId: string, actor: Actor): Promise<Booking> {
+    return this.transitionWithin(tx, bookingId, "cancel", actor);
+  }
+
+  private async transitionWithin(
+    tx: TxRepositories,
+    bookingId: string,
+    action: BookingAction,
+    actor: Actor | null,
+    input?: DecisionInput | AttendanceInput,
+  ): Promise<Booking> {
+    const rule = TRANSITIONS[action];
+    await tx.bookings.lockById(bookingId);
+    const before = await tx.bookings.findById(bookingId);
+    if (!before) throw bookingNotFound();
+    if (!rule.from.includes(before.status)) {
+      throw new DomainError("INVALID_TRANSITION", `Cannot ${action} a booking that is ${before.status}`);
+    }
+    const step = { tx, before, to: rule.to, now: this.now() };
+
+    switch (action) {
+      case "cancel":
+        return this.applyCancel(step, requireActor(actor, action));
+      case "approve":
+      case "reject":
+        return this.applyDecision(step, action, requireActor(actor, action), requireDecision(input, action));
+      case "checkin":
+      case "checkout":
+        return this.applyAttendance(step, action, requireActor(actor, action), requireAttendance(input, action));
+      case "no_show":
+      case "auto_complete":
+      case "expire":
+        return this.applySystem(step, action);
+    }
   }
 
   private async applyCancel(step: TransitionStep, actor: Actor): Promise<Booking> {
@@ -351,7 +405,7 @@ export class BookingService {
       before,
       after,
     });
-    // Phase 5: freeing a slot triggers waitlist promotion here.
+    // The freed slot is picked up by the waitlist promoter job (§8).
     return after;
   }
 
@@ -410,7 +464,7 @@ export class BookingService {
       before: { ...before, approvals },
       after: { ...after, approvals: [...approvals, approval] },
     });
-    // Phase 5: a rejection frees the slot and triggers waitlist promotion here.
+    // A rejection frees the slot; the waitlist promoter job picks it up (§8).
     return after;
   }
 
@@ -504,7 +558,7 @@ export class BookingService {
       before: { ...before, checkin: existing },
       after: { ...after, checkin },
     });
-    // Phase 5: no_show and expire free the slot; waitlist promotion hooks in here.
+    // no_show and expire free the slot; the waitlist promoter job picks it up (§8).
     return after;
   }
 
@@ -574,6 +628,22 @@ function replayOf(prior: Booking, input: CreateBookingInput): CreateBookingResul
     );
   }
   return { booking: prior, replayed: true };
+}
+
+/**
+ * For bookings created on a user's behalf (waitlist promotion, series
+ * materialization) there is no request to authorize, so the booker must pass
+ * the same booking:create rule the route applies to their own requests:
+ * still active, and the resource active and in their department. A user who
+ * has since been deactivated or moved department is not booked.
+ */
+export function assertMayBook(user: User | null, resource: Resource): void {
+  const booker: Actor | null = user
+    ? { id: user.id, role: user.role, departmentId: user.departmentId, isActive: user.isActive }
+    : null;
+  if (!booker || !can(booker, "booking:create", resource)) {
+    throw new DomainError("FORBIDDEN", "The booker is no longer eligible to book this resource");
+  }
 }
 
 /**

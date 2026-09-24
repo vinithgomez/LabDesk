@@ -73,6 +73,8 @@ export interface NewBooking {
   purpose: string;
   attendeeCount: number;
   idempotencyKey: string | null;
+  /** Set when the booking is a materialized occurrence of a recurring series. */
+  seriesId: string | null;
 }
 
 export interface BookingListFilter {
@@ -234,6 +236,32 @@ export class BookingReader {
     ).map((r) => r.id);
   }
 
+  /** Every booking materialized from a series, in time order. */
+  async listBySeries(seriesId: string): Promise<Booking[]> {
+    return bookingRows.parse(
+      await this.db.$queryRaw`
+        SELECT ${BOOKING_COLUMNS} FROM bookings b
+        WHERE b.series_id = ${seriesId}::uuid
+        ORDER BY lower(b.period)`,
+    );
+  }
+
+  /**
+   * A series' occurrences that cancelling the series cancels: not started yet,
+   * and in a state the state machine lets 'cancel' leave (pending/approved).
+   * transitionBooking re-checks the state under each row lock.
+   */
+  async listCancellableInSeries(seriesId: string, now: Date): Promise<string[]> {
+    return idRows.parse(
+      await this.db.$queryRaw`
+        SELECT b.id::text AS id FROM bookings b
+        WHERE b.series_id = ${seriesId}::uuid
+          AND b.status IN ('pending', 'approved')
+          AND lower(b.period) > ${now.toISOString()}::timestamptz
+        ORDER BY lower(b.period)`,
+    ).map((r) => r.id);
+  }
+
   /** Slot-holding bookings (pending/approved/checked_in) overlapping [from, to). */
   async heldSlots(resourceId: string, from: Date, to: Date): Promise<HeldSlot[]> {
     return z
@@ -283,7 +311,7 @@ export class BookingWriter extends BookingReader {
       return single(
         await this.tx.$queryRaw`
           WITH inserted AS (
-            INSERT INTO bookings (resource_id, user_id, period, status, purpose, attendee_count, idempotency_key)
+            INSERT INTO bookings (resource_id, user_id, period, status, purpose, attendee_count, idempotency_key, series_id)
             VALUES (
               ${b.resourceId}::uuid,
               ${b.userId}::uuid,
@@ -291,7 +319,8 @@ export class BookingWriter extends BookingReader {
               ${b.initialStatus}::booking_status,
               ${b.purpose},
               ${b.attendeeCount},
-              ${b.idempotencyKey}
+              ${b.idempotencyKey},
+              ${b.seriesId}::uuid
             )
             RETURNING *
           )

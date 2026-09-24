@@ -24,15 +24,26 @@ export interface SlotRequest {
 
 export type SlotRules = Pick<Resource, "capacity" | "minSlotMinutes" | "maxSlotMinutes" | "bookingHorizonDays">;
 
+/** The instant an IST wall-clock time ("HH:MM") falls on an IST date ("YYYY-MM-DD"). */
+export function istInstant(date: string, hhmm: string): Date {
+  return new Date(`${date}T${hhmm}:00+05:30`);
+}
+
 /**
  * Throws the DomainError for the first rule the slot breaks. Periods are
  * half-open [start, end), so a booking ending exactly at IST midnight is
  * still a same-day booking.
  */
 export function assertBookableSlot(resource: SlotRules, slot: SlotRequest, now: Date): void {
-  const start = slot.startsAt.getTime();
+  assertSlotLength(resource, slot);
+  assertWithinHorizon(resource, slot, now);
+  assertCapacity(resource, slot.attendeeCount);
+}
+
+/** Same IST day, and within the resource's min/max slot length. */
+export function assertSlotLength(resource: SlotRules, slot: Pick<SlotRequest, "startsAt" | "endsAt">): void {
   const end = slot.endsAt.getTime();
-  const minutes = (end - start) / MINUTE_MS;
+  const minutes = (end - slot.startsAt.getTime()) / MINUTE_MS;
 
   if (istDate(slot.startsAt) !== istDate(new Date(end - 1))) {
     throw new DomainError(
@@ -52,17 +63,33 @@ export function assertBookableSlot(resource: SlotRules, slot: SlotRequest, now: 
       `This resource must be booked for at least ${resource.minSlotMinutes} minutes`,
     );
   }
-  if (start < now.getTime()) {
+}
+
+/** Not in the past, and ending within the resource's booking horizon. */
+export function assertWithinHorizon(
+  resource: SlotRules,
+  slot: Pick<SlotRequest, "startsAt" | "endsAt">,
+  now: Date,
+): void {
+  if (slot.startsAt.getTime() < now.getTime()) {
     throw new DomainError("OUTSIDE_HORIZON", "Bookings cannot start in the past");
   }
-  if (end > now.getTime() + resource.bookingHorizonDays * DAY_MS) {
+  if (slot.endsAt.getTime() > horizonEnd(resource, now).getTime()) {
     throw new DomainError(
       "OUTSIDE_HORIZON",
       `This resource can only be booked up to ${resource.bookingHorizonDays} days ahead`,
     );
   }
+}
+
+/** The latest instant a booking made at `now` may end. */
+export function horizonEnd(resource: Pick<SlotRules, "bookingHorizonDays">, now: Date): Date {
+  return new Date(now.getTime() + resource.bookingHorizonDays * DAY_MS);
+}
+
+export function assertCapacity(resource: SlotRules, attendeeCount: number): void {
   // capacity 0 means "not people-limited" (e.g. some equipment).
-  if (resource.capacity > 0 && slot.attendeeCount > resource.capacity) {
+  if (resource.capacity > 0 && attendeeCount > resource.capacity) {
     throw new DomainError(
       "CAPACITY_EXCEEDED",
       `This resource holds at most ${resource.capacity} people`,
