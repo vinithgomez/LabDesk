@@ -8,6 +8,7 @@ import { errorHandler, notFoundHandler } from "./http/errors.js";
 import { createFixedWindowLimiter } from "./http/rate-limit.js";
 import type { Logger } from "./lib/logger.js";
 import type { Redis } from "./lib/redis.js";
+import { analyticsRouter } from "./routes/analytics.routes.js";
 import { authRouter } from "./routes/auth.routes.js";
 import { departmentsRouter } from "./routes/departments.routes.js";
 import { bookingsRouter } from "./routes/bookings.routes.js";
@@ -62,6 +63,7 @@ export function createApp({ config, services, logger, redis }: AppDeps): Express
 
   app.use("/api/waitlist", waitlistRouter(services.auth, services.waitlist, services.resources));
   app.use("/api/series", seriesRouter(services.auth, services.series, services.resources));
+  app.use("/api/analytics", analyticsRouter(services.auth, services.analytics, services.resources));
 
   app.use(notFoundHandler);
   app.use(errorHandler(logger));

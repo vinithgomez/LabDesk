@@ -3,6 +3,7 @@ import { createTokenSigner } from "./auth/tokens.js";
 import type { AppConfig } from "./config/env.js";
 import type { PrismaClient } from "./db/prisma.js";
 import { createUnitOfWork, type UnitOfWork } from "./repositories/index.js";
+import { AnalyticsService } from "./services/analytics.service.js";
 import { AuthService } from "./services/auth.service.js";
 import { BookingService } from "./services/booking.service.js";
 import { CheckinService } from "./services/checkin.service.js";
@@ -21,6 +22,7 @@ export interface Services {
   checkins: CheckinService;
   waitlist: WaitlistService;
   series: SeriesService;
+  analytics: AnalyticsService;
 }
 
 export interface ServiceOverrides {
@@ -53,5 +55,6 @@ export function createServices(prisma: PrismaClient, config: AppConfig, override
     checkins: new CheckinService(uow, config.publicAppUrl, clock),
     waitlist: new WaitlistService(uow, bookings, clock),
     series: new SeriesService(uow, bookings, clock),
+    analytics: new AnalyticsService(uow, clock),
   };
 }

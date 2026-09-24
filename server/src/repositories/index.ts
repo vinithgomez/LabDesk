@@ -1,6 +1,7 @@
 import type { DbClient, PrismaClient } from "../db/prisma.js";
 import { runInTransaction, type TxClient } from "../db/transaction.js";
 import type { AuditEntry } from "../domain/audit.js";
+import { AnalyticsRepository } from "./analytics.repository.js";
 import { ApprovalReader, ApprovalWriter } from "./approval.repository.js";
 import { AuditRepository } from "./audit.repository.js";
 import { BookingReader, BookingWriter } from "./booking.repository.js";
@@ -26,6 +27,8 @@ export interface Repositories {
   waitlist: WaitlistReader;
   series: SeriesReader;
   maintenance: MaintenanceRepository;
+  /** Read-only aggregate queries (§10). */
+  analytics: AnalyticsRepository;
 }
 
 /**
@@ -60,6 +63,7 @@ export function createRepositories(db: DbClient): Repositories {
     waitlist: new WaitlistReader(db),
     series: new SeriesReader(db),
     maintenance: new MaintenanceRepository(db),
+    analytics: new AnalyticsRepository(db),
   };
 }
 
