@@ -60,6 +60,14 @@ export class ResourceReader {
     return row ? toResource(row) : null;
   }
 
+  /**
+   * The only query that reads qr_secret. Used solely to sign and verify
+   * resource QR codes (CheckinService); never returned from the API.
+   */
+  findQrCredentials(id: string): Promise<{ id: string; isActive: boolean; qrSecret: string } | null> {
+    return this.db.resource.findUnique({ where: { id }, select: { id: true, isActive: true, qrSecret: true } });
+  }
+
   async findManyByIds(ids: readonly string[]): Promise<Resource[]> {
     if (ids.length === 0) return [];
     const rows = await this.db.resource.findMany({ where: { id: { in: [...ids] } }, select: resourceSelect });

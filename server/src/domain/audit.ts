@@ -16,7 +16,14 @@ export type AuditAction =
   | "booking.cancelled"
   | "booking.level_approved"
   | "booking.approved"
-  | "booking.rejected";
+  | "booking.rejected"
+  | "booking.checked_in"
+  | "booking.checked_out"
+  | "booking.checkin_overridden"
+  | "booking.checkout_overridden"
+  | "booking.no_show"
+  | "booking.auto_completed"
+  | "booking.expired";
 
 export interface AuditEntry {
   /** null is reserved for system actors (scheduled jobs in later phases). */

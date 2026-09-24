@@ -1,4 +1,4 @@
-// LabDesk data model — Phase 1 tables only.
+// LabDesk data model.
 // Constraints Prisma cannot express (CHECKs, exclusion constraints) live in
 // raw SQL inside the migration files. All timestamps are timestamptz (UTC).
 
@@ -41,6 +41,21 @@ enum ApprovalDecision {
   @@map("approval_decision")
 }
 
+enum CheckinMethod {
+  qr
+  manual_override
+
+  @@map("checkin_method")
+}
+
+enum CheckoutMethod {
+  qr
+  manual_override
+  auto
+
+  @@map("checkout_method")
+}
+
 enum ResourceType {
   lab
   room
@@ -75,6 +90,8 @@ model User {
   auditEntries              AuditLog[]
   bookings                  Booking[]
   approvalsGiven            BookingApproval[]
+  checkinsOverridden        Checkin[]           @relation("CheckinOverriddenBy")
+  checkoutsOverridden       Checkin[]           @relation("CheckoutOverriddenBy")
   maintenanceWindowsCreated MaintenanceWindow[]
 
   @@index([departmentId])
@@ -180,6 +197,7 @@ model Booking {
   resource       Resource                 @relation(fields: [resourceId], references: [id], onDelete: Restrict)
   user           User                     @relation(fields: [userId], references: [id], onDelete: Restrict)
   approvals      BookingApproval[]
+  checkin        Checkin?
 
   @@index([resourceId])
   @@index([userId])
@@ -222,4 +240,26 @@ model BookingApproval {
   @@unique([bookingId, approverId])
   @@index([approverId])
   @@map("booking_approvals")
+}
+
+// Actual usage against booked usage (CLAUDE.md §4 checkins, §7). One row per
+// booking, created by check-in and completed by check-out; actual minutes are
+// derived (checked_out_at - checked_in_at), never stored. Beyond §4:
+// checkout_method / checkout_overridden_by record how the session ended, so
+// an auto-completed session (assumed full use) is distinguishable from a real
+// check-out for utilization analytics.
+model Checkin {
+  id                   String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  bookingId            String          @unique @map("booking_id") @db.Uuid
+  checkedInAt          DateTime        @map("checked_in_at") @db.Timestamptz(6)
+  checkedOutAt         DateTime?       @map("checked_out_at") @db.Timestamptz(6)
+  checkinMethod        CheckinMethod   @map("checkin_method")
+  overriddenBy         String?         @map("overridden_by") @db.Uuid
+  checkoutMethod       CheckoutMethod? @map("checkout_method")
+  checkoutOverriddenBy String?         @map("checkout_overridden_by") @db.Uuid
+  booking              Booking         @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  overrider            User?           @relation("CheckinOverriddenBy", fields: [overriddenBy], references: [id], onDelete: Restrict)
+  checkoutOverrider    User?           @relation("CheckoutOverriddenBy", fields: [checkoutOverriddenBy], references: [id], onDelete: Restrict)
+
+  @@map("checkins")
 }

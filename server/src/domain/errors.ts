@@ -27,7 +27,10 @@ export type DomainErrorCode =
   | "CAPACITY_EXCEEDED"
   | "IDEMPOTENCY_KEY_REUSED"
   | "INVALID_TRANSITION"
-  | "OWNER_REQUIRED";
+  | "OWNER_REQUIRED"
+  | "INVALID_QR"
+  | "NO_ACTIVE_BOOKING"
+  | "RATE_LIMITED";
 
 export class DomainError extends Error {
   constructor(

@@ -126,3 +126,19 @@ export interface BookingApproval {
   decidedAt: Date;
 }
 
+export const CHECKIN_METHODS = ["qr", "manual_override"] as const;
+export type CheckinMethod = (typeof CHECKIN_METHODS)[number];
+export const CHECKOUT_METHODS = ["qr", "manual_override", "auto"] as const;
+export type CheckoutMethod = (typeof CHECKOUT_METHODS)[number];
+
+/** Actual usage of a booking (CLAUDE.md §4 checkins). */
+export interface Checkin {
+  id: string;
+  bookingId: string;
+  checkedInAt: Date;
+  checkedOutAt: Date | null;
+  checkinMethod: CheckinMethod;
+  overriddenBy: string | null;
+  checkoutMethod: CheckoutMethod | null;
+  checkoutOverriddenBy: string | null;
+}

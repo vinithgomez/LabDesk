@@ -31,6 +31,15 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
+  REDIS_URL: z.string().min(1),
+  // Base URL of the PWA, printed into resource QR codes. Changing it
+  // invalidates every printed QR, so treat it as fixed per deployment.
+  PUBLIC_APP_URL: z.url().default("http://localhost:5173"),
+  // Scheduled jobs (no-show sweeper, auto-complete, lapsed-pending expiry).
+  JOBS_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((v) => v === "true"),
 });
 
 export interface AppConfig {
@@ -44,6 +53,9 @@ export interface AppConfig {
   corsOrigin: string;
   bcryptRounds: number;
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
+  redisUrl: string;
+  publicAppUrl: string;
+  jobsEnabled: boolean;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -64,5 +76,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     corsOrigin: e.CORS_ORIGIN,
     bcryptRounds: e.BCRYPT_ROUNDS,
     logLevel: e.LOG_LEVEL,
+    redisUrl: e.REDIS_URL,
+    publicAppUrl: e.PUBLIC_APP_URL.replace(/\/+$/, ""),
+    jobsEnabled: e.JOBS_ENABLED,
   };
 }
