@@ -9,11 +9,13 @@ import { DepartmentRepository } from "./department.repository.js";
 import { MaintenanceRepository } from "./maintenance.repository.js";
 import { RefreshTokenRepository } from "./refresh-token.repository.js";
 import { ResourceReader, ResourceWriter } from "./resource.repository.js";
+import { SeriesReader, SeriesWriter } from "./series.repository.js";
 import { UserReader, UserWriter } from "./user.repository.js";
+import { WaitlistReader, WaitlistWriter } from "./waitlist.repository.js";
 
 export interface Repositories {
   departments: DepartmentRepository;
-  // users, resources, bookings, approvals and checkins are read-only here:
+  // users, resources, bookings, approvals, checkins, waitlist and series are read-only here:
   // their writes and row locks need a transaction (see TxRepositories).
   users: UserReader;
   refreshTokens: RefreshTokenRepository;
@@ -21,6 +23,8 @@ export interface Repositories {
   bookings: BookingReader;
   approvals: ApprovalReader;
   checkins: CheckinReader;
+  waitlist: WaitlistReader;
+  series: SeriesReader;
   maintenance: MaintenanceRepository;
 }
 
@@ -39,6 +43,8 @@ export interface TxRepositories extends Repositories {
   bookings: BookingWriter;
   approvals: ApprovalWriter;
   checkins: CheckinWriter;
+  waitlist: WaitlistWriter;
+  series: SeriesWriter;
   writeAudit(entry: AuditEntry): Promise<void>;
 }
 
@@ -51,6 +57,8 @@ export function createRepositories(db: DbClient): Repositories {
     bookings: new BookingReader(db),
     approvals: new ApprovalReader(db),
     checkins: new CheckinReader(db),
+    waitlist: new WaitlistReader(db),
+    series: new SeriesReader(db),
     maintenance: new MaintenanceRepository(db),
   };
 }
@@ -64,6 +72,8 @@ export function createTxRepositories(tx: TxClient): TxRepositories {
     bookings: new BookingWriter(tx),
     approvals: new ApprovalWriter(tx),
     checkins: new CheckinWriter(tx),
+    waitlist: new WaitlistWriter(tx),
+    series: new SeriesWriter(tx),
     writeAudit: (entry) => audit.insert(entry),
   };
 }
