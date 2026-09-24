@@ -1,7 +1,9 @@
 /**
- * Phase 1 seed: two departments (so department scoping is demonstrable), the
- * bootstrap admin from SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD, and a handful
- * of faculty, lab in-charges, students and resources in BOTH departments.
+ * Seed: two departments (so department scoping is demonstrable), the
+ * bootstrap admin from SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD, a handful of
+ * faculty, lab in-charges, students and resources in BOTH departments, and
+ * (Phase 6, demo only) HISTORY_WEEKS of past bookings and check-ins so the
+ * analytics dashboard has something to show — see seed-history.ts.
  *
  * Idempotent: safe to run repeatedly. Existing users keep their passwords.
  * Run with `npm run db:seed`.
@@ -11,6 +13,11 @@ import { z } from "zod";
 import { createPasswordHasher } from "../auth/password.js";
 import type { ResourceType, UserRole } from "../domain/types.js";
 import { createPrismaClient, type PrismaClient } from "./prisma.js";
+import { seedHistory, type HistoryResource, type UsageProfile } from "./seed-history.js";
+
+/** Weeks of demo booking history (CLAUDE.md §12: 8 weeks). */
+const HISTORY_WEEKS = 8;
+const DAY_MS = 86_400_000;
 
 const env = z
   .object({
@@ -43,9 +50,17 @@ interface SeedResource {
   minSlotMinutes: number;
   maxSlotMinutes: number;
   bookingHorizonDays: number;
+  /** IST opening hours used for utilization, and the days they apply (0 = Sunday). */
+  hours: { start: string; end: string; days: number[] };
   /** Owner emails with the approval level each decides at. */
   owners: { email: string; level: 1 | 2 }[];
+  /** Demo history: how busy it is, and who books it. */
+  usage: UsageProfile & { bookers: "students" | "staff" };
+  /** How long ago it came into service (the idle ranking needs 4 weeks). */
+  ageDays: number;
 }
+
+const WEEKDAYS = [1, 2, 3, 4, 5];
 
 const DEPARTMENTS = [
   { code: "CSE", name: "Computer Science & Engineering" },
@@ -59,18 +74,46 @@ const USERS: SeedUser[] = [
   { email: "arjun.nair@college.edu", fullName: "Arjun Nair", role: "student", dept: "CSE", rollNo: "CSE21001" },
   { email: "priya.shah@college.edu", fullName: "Priya Shah", role: "student", dept: "CSE", rollNo: "CSE21002" },
   { email: "kabir.das@college.edu", fullName: "Kabir Das", role: "student", dept: "CSE", rollNo: "CSE21003" },
+  { email: "neha.gupta@college.edu", fullName: "Neha Gupta", role: "student", dept: "CSE", rollNo: "CSE21004" },
+  { email: "vikram.singh@college.edu", fullName: "Vikram Singh", role: "student", dept: "CSE", rollNo: "CSE21005" },
   { email: "meera.iyer@college.edu", fullName: "Dr. Meera Iyer", role: "faculty", dept: "ECE" },
   { email: "suresh.menon@college.edu", fullName: "Suresh Menon", role: "lab_incharge", dept: "ECE" },
   { email: "divya.pillai@college.edu", fullName: "Divya Pillai", role: "student", dept: "ECE", rollNo: "ECE21001" },
   { email: "rahul.verma@college.edu", fullName: "Rahul Verma", role: "student", dept: "ECE", rollNo: "ECE21002" },
+  { email: "ananya.bose@college.edu", fullName: "Ananya Bose", role: "student", dept: "ECE", rollNo: "ECE21003" },
 ];
 
+/** Demo history: habitual no-showers, so the no-show table has a story. */
+const NO_SHOW_HABITS: Record<string, number> = {
+  "kabir.das@college.edu": 0.35,
+  "rahul.verma@college.edu": 0.22,
+  "vikram.singh@college.edu": 0.15,
+};
+
 const RESOURCES: SeedResource[] = [
+  {
+    dept: "CSE", name: "Logic Analyzer LA-16", type: "equipment", location: "Block A, Room 214", capacity: 1,
+    description: "16-channel logic analyzer.", requiresApproval: false, approvalLevels: 1,
+    minSlotMinutes: 30, maxSlotMinutes: 120, bookingHorizonDays: 7,
+    owners: [{ email: "ravi.kumar@college.edu", level: 1 }],
+    hours: { start: "09:00", end: "17:00", days: WEEKDAYS },
+    usage: { intensity: 0, lengths: [60], bookers: "students" }, ageDays: 70,
+  },
+  {
+    dept: "CSE", name: "3D Printer P-2", type: "equipment", location: "Block A, Maker Space", capacity: 1,
+    description: "FDM printer, 25 cm build volume. New this term.", requiresApproval: false, approvalLevels: 1,
+    minSlotMinutes: 60, maxSlotMinutes: 240, bookingHorizonDays: 14,
+    owners: [{ email: "ravi.kumar@college.edu", level: 1 }],
+    hours: { start: "09:00", end: "18:00", days: WEEKDAYS },
+    usage: { intensity: 0.3, lengths: [120, 180, 240], bookers: "students" }, ageDays: 14,
+  },
   {
     dept: "CSE", name: "Systems Lab L-201", type: "lab", location: "Block A, 2nd floor", capacity: 40,
     description: "40 Linux workstations, projector.", requiresApproval: false, approvalLevels: 1,
     minSlotMinutes: 60, maxSlotMinutes: 180, bookingHorizonDays: 14,
     owners: [{ email: "ravi.kumar@college.edu", level: 1 }],
+    hours: { start: "08:00", end: "20:00", days: [1, 2, 3, 4, 5, 6] },
+    usage: { intensity: 0.6, lengths: [60, 120, 180], bookers: "students" }, ageDays: 70,
   },
   {
     dept: "CSE", name: "GPU Workstation #1", type: "equipment", location: "Block A, Room 214", capacity: 1,
@@ -80,24 +123,32 @@ const RESOURCES: SeedResource[] = [
       { email: "anita.rao@college.edu", level: 1 },
       { email: "ravi.kumar@college.edu", level: 2 },
     ],
+    hours: { start: "08:00", end: "22:00", days: [0, 1, 2, 3, 4, 5, 6] },
+    usage: { intensity: 0.5, lengths: [120, 180, 240], bookers: "students" }, ageDays: 70,
   },
   {
     dept: "CSE", name: "Seminar Room S-1", type: "room", location: "Block A, ground floor", capacity: 60,
     description: "Seminar hall with AV setup.", requiresApproval: true, approvalLevels: 1,
     minSlotMinutes: 30, maxSlotMinutes: 240, bookingHorizonDays: 30,
     owners: [{ email: "anita.rao@college.edu", level: 1 }],
+    hours: { start: "09:00", end: "17:00", days: WEEKDAYS },
+    usage: { intensity: 0.22, lengths: [60, 90, 120], bookers: "staff" }, ageDays: 70,
   },
   {
     dept: "ECE", name: "VLSI Design Lab", type: "lab", location: "Block C, 1st floor", capacity: 30,
     description: "EDA workstations with FPGA boards.", requiresApproval: false, approvalLevels: 1,
     minSlotMinutes: 60, maxSlotMinutes: 180, bookingHorizonDays: 14,
     owners: [{ email: "suresh.menon@college.edu", level: 1 }],
+    hours: { start: "08:00", end: "18:00", days: WEEKDAYS },
+    usage: { intensity: 0.42, lengths: [60, 120, 180], bookers: "students" }, ageDays: 70,
   },
   {
     dept: "ECE", name: "Digital Storage Oscilloscope", type: "equipment", location: "Block C, Room 105", capacity: 1,
     description: "4-channel 200 MHz DSO.", requiresApproval: true, approvalLevels: 1,
     minSlotMinutes: 30, maxSlotMinutes: 120, bookingHorizonDays: 7,
     owners: [{ email: "suresh.menon@college.edu", level: 1 }],
+    hours: { start: "08:00", end: "18:00", days: WEEKDAYS },
+    usage: { intensity: 0.03, lengths: [30, 60], bookers: "students" }, ageDays: 70,
   },
   {
     dept: "ECE", name: "Embedded Systems Lab", type: "lab", location: "Block C, 2nd floor", capacity: 36,
@@ -107,6 +158,8 @@ const RESOURCES: SeedResource[] = [
       { email: "meera.iyer@college.edu", level: 1 },
       { email: "suresh.menon@college.edu", level: 2 },
     ],
+    hours: { start: "09:00", end: "18:00", days: WEEKDAYS },
+    usage: { intensity: 0.2, lengths: [60, 120], bookers: "students" }, ageDays: 70,
   },
 ];
 
@@ -123,6 +176,12 @@ async function upsertUser(
     select: { id: true },
   });
   return row.id;
+}
+
+function idOf(userIds: ReadonlyMap<string, string>, email: string): string {
+  const id = userIds.get(email);
+  if (!id) throw new Error(`User ${email} was not seeded`);
+  return id;
 }
 
 async function main(): Promise<void> {
@@ -164,14 +223,25 @@ async function main(): Promise<void> {
       userIds.set(u.email, id);
     }
 
-    for (const { dept, owners, ...fields } of RESOURCES) {
+    const now = new Date();
+    const history: HistoryResource[] = [];
+    for (const { dept, owners, hours, usage, ageDays, ...rest } of RESOURCES) {
       const departmentId = deptId(dept);
+      const since = new Date(now.getTime() - ageDays * DAY_MS);
+      const fields = {
+        ...rest,
+        businessHoursStart: new Date(`1970-01-01T${hours.start}:00.000Z`),
+        businessHoursEnd: new Date(`1970-01-01T${hours.end}:00.000Z`),
+        businessDays: hours.days,
+        // Demo: backdated so the idle ranking's 4-week minimum is met (or not).
+        createdAt: since,
+      };
       const ownerRows = owners.map(({ email, level }) => {
         const id = userIds.get(email);
         if (!id) throw new Error(`Owner ${email} was not seeded`);
         return { userId: id, approvalLevel: level };
       });
-      await prisma.$transaction(async (tx) => {
+      const resourceId = await prisma.$transaction(async (tx) => {
         const existing = await tx.resource.findFirst({ where: { departmentId, name: fields.name }, select: { id: true } });
         const resource = existing
           ? await tx.resource.update({ where: { id: existing.id }, data: fields, select: { id: true } })
@@ -181,12 +251,36 @@ async function main(): Promise<void> {
         await tx.resourceOwner.createMany({
           data: ownerRows.map((o) => ({ resourceId: resource.id, ...o })),
         });
+        return resource.id;
+      });
+
+      const deptUsers = USERS.filter((u) => u.dept === dept);
+      const bookerPool = deptUsers.filter((u) =>
+        usage.bookers === "staff" ? u.role === "faculty" || u.role === "lab_incharge" : u.role === "student",
+      );
+      history.push({
+        id: resourceId,
+        name: rest.name,
+        requiresApproval: rest.requiresApproval,
+        minSlotMinutes: rest.minSlotMinutes,
+        maxSlotMinutes: rest.maxSlotMinutes,
+        businessHoursStart: hours.start,
+        businessHoursEnd: hours.end,
+        businessDays: hours.days,
+        since,
+        ownerId: ownerRows[0]?.userId ?? null,
+        profile: usage,
+        bookers: bookerPool.map((u, i) => ({ userId: idOf(userIds, u.email), weight: 1 + (i % 3) * 0.5 })),
       });
     }
 
+    const habits = new Map(Object.entries(NO_SHOW_HABITS).map(([email, rate]) => [idOf(userIds, email), rate]));
+    const seeded = await seedHistory(prisma, history, habits, { now, weeks: HISTORY_WEEKS });
+
     console.log(
       `Seeded ${DEPARTMENTS.length} departments, admin ${env.SEED_ADMIN_EMAIL}, ` +
-        `${USERS.length} demo users, ${RESOURCES.length} resources.`,
+        `${USERS.length} demo users, ${RESOURCES.length} resources, ` +
+        `${seeded.bookings} new history bookings (${seeded.checkins} check-ins) over ${HISTORY_WEEKS} weeks.`,
     );
   } finally {
     await prisma.$disconnect();
