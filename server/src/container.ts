@@ -3,8 +3,9 @@ import { createTokenSigner } from "./auth/tokens.js";
 import type { AppConfig } from "./config/env.js";
 import type { PrismaClient } from "./db/prisma.js";
 import { createUnitOfWork, type UnitOfWork } from "./repositories/index.js";
-import { BookingService } from "./services/booking.service.js";
 import { AuthService } from "./services/auth.service.js";
+import { BookingService } from "./services/booking.service.js";
+import { CheckinService } from "./services/checkin.service.js";
 import { DepartmentService } from "./services/department.service.js";
 import { ResourceService } from "./services/resource.service.js";
 import { UserService } from "./services/user.service.js";
@@ -15,16 +16,20 @@ export interface Services {
   users: UserService;
   resources: ResourceService;
   bookings: BookingService;
+  checkins: CheckinService;
 }
 
-/** Wires repositories -> services. The only place that knows the concrete graph. */
 export interface ServiceOverrides {
   /** Tests substitute a unit of work to inject barriers or faults. */
   uow?: UnitOfWork;
+  /** Tests substitute a clock to hit time-window boundaries exactly. */
+  clock?: () => Date;
 }
 
+/** Wires repositories -> services. The only place that knows the concrete graph. */
 export function createServices(prisma: PrismaClient, config: AppConfig, overrides: ServiceOverrides = {}): Services {
   const uow = overrides.uow ?? createUnitOfWork(prisma);
+  const clock = overrides.clock ?? (() => new Date());
   const tokens = createTokenSigner({
     accessSecret: config.jwtAccessSecret,
     refreshSecret: config.jwtRefreshSecret,
@@ -38,6 +43,7 @@ export function createServices(prisma: PrismaClient, config: AppConfig, override
     departments: new DepartmentService(uow),
     users: new UserService(uow),
     resources: new ResourceService(uow),
-    bookings: new BookingService(uow),
+    bookings: new BookingService(uow, clock),
+    checkins: new CheckinService(uow, config.publicAppUrl, clock),
   };
 }

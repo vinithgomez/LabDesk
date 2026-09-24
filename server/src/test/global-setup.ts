@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { RedisContainer, type StartedRedisContainer } from "@testcontainers/redis";
 import { parse } from "dotenv";
 import type { GlobalSetupContext } from "vitest/node";
 import { z } from "zod";
@@ -9,6 +10,7 @@ import { z } from "zod";
 declare module "vitest" {
   export interface ProvidedContext {
     databaseUrl: string;
+    redisUrl: string;
   }
 }
 
@@ -42,14 +44,18 @@ function testDatabaseCredentials(): { user: string; password: string; database: 
  * Starts a disposable PostgreSQL 16 (same major as docker-compose and prod)
  * and applies the real migrations, so tests exercise the actual schema,
  * extensions and constraints. Never a mock or SQLite (CLAUDE.md §2.5).
+ * Also a disposable Redis 7 for rate limiting and job locks.
  */
 export default async function setup({ provide }: GlobalSetupContext): Promise<() => Promise<void>> {
   const credentials = testDatabaseCredentials();
-  const container: StartedPostgreSqlContainer = await new PostgreSqlContainer("postgres:16-alpine")
-    .withDatabase(credentials.database)
-    .withUsername(credentials.user)
-    .withPassword(credentials.password)
-    .start();
+  const [container, redis]: [StartedPostgreSqlContainer, StartedRedisContainer] = await Promise.all([
+    new PostgreSqlContainer("postgres:16-alpine")
+      .withDatabase(credentials.database)
+      .withUsername(credentials.user)
+      .withPassword(credentials.password)
+      .start(),
+    new RedisContainer("redis:7-alpine").start(),
+  ]);
 
   const databaseUrl = `${container.getConnectionUri()}?schema=public`;
   const prismaCli = createRequire(import.meta.url).resolve("prisma/build/index.js");
@@ -59,7 +65,8 @@ export default async function setup({ provide }: GlobalSetupContext): Promise<()
   });
 
   provide("databaseUrl", databaseUrl);
+  provide("redisUrl", redis.getConnectionUrl());
   return async () => {
-    await container.stop();
+    await Promise.all([container.stop(), redis.stop()]);
   };
 }

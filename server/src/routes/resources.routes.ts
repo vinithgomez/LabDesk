@@ -6,6 +6,7 @@ import { actorOf, requireAuth } from "../http/authenticate.js";
 import { isoDateTime, respond } from "../http/respond.js";
 import type { AuthService } from "../services/auth.service.js";
 import type { BookingService } from "../services/booking.service.js";
+import type { CheckinService } from "../services/checkin.service.js";
 import type { ResourceService } from "../services/resource.service.js";
 import { instant } from "./bookings.routes.js";
 import { idParams } from "./schemas.js";
@@ -129,7 +130,12 @@ export type ResourceDto = z.output<typeof resourceDto>;
 
 // ---- Router ---------------------------------------------------------------
 
-export function resourcesRouter(auth: AuthService, resources: ResourceService, bookings: BookingService): Router {
+export function resourcesRouter(
+  auth: AuthService,
+  resources: ResourceService,
+  bookings: BookingService,
+  checkins: CheckinService,
+): Router {
   const router = Router();
   router.use(requireAuth(auth));
 
@@ -157,6 +163,27 @@ export function resourcesRouter(auth: AuthService, resources: ResourceService, b
     if (!can(actor, "resource:view", resource)) throw denial(actor, "resource:view", resource);
 
     respond(res, 200, resourceDto, resource);
+  });
+
+  /**
+   * The printable check-in QR (§7, §9: manage). A PNG, not a JSON envelope.
+   * Deterministic, so reprinting yields the identical code. no-store: the
+   * image is derived from the resource's secret.
+   */
+  router.get("/:id/qr", async (req, res) => {
+    const actor = actorOf(req);
+    const { id } = idParams.parse(req.params);
+
+    const resource = await resources.get(id);
+    if (!can(actor, "resource:manage", resource)) throw denial(actor, "resource:manage", resource);
+
+    const { png } = await checkins.qrFor(resource.id);
+    res
+      .status(200)
+      .type("png")
+      .set("Cache-Control", "no-store")
+      .set("Content-Disposition", `inline; filename="labdesk-qr-${resource.id}.png"`)
+      .send(png);
   });
 
   router.get("/:id/availability", async (req, res) => {

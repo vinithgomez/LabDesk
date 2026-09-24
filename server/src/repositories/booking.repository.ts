@@ -30,6 +30,7 @@ const bookingRow = z.object({
   updatedAt: z.date(),
 });
 const bookingRows = z.array(bookingRow);
+const idRows = z.array(z.object({ id: z.string() }));
 
 const BOOKING_COLUMNS = Prisma.sql`
   b.id::text              AS "id",
@@ -171,6 +172,66 @@ export class BookingReader {
         ORDER BY lower(b.period), b.id
         LIMIT ${limit}`,
     );
+  }
+
+  /** A user's bookings on one resource, in the given statuses, overlapping [from, to). */
+  async listForUserOnResource(
+    userId: string,
+    resourceId: string,
+    statuses: readonly BookingStatus[],
+    from: Date,
+    to: Date,
+  ): Promise<Booking[]> {
+    return bookingRows.parse(
+      await this.db.$queryRaw`
+        SELECT ${BOOKING_COLUMNS} FROM bookings b
+        WHERE b.user_id = ${userId}::uuid
+          AND b.resource_id = ${resourceId}::uuid
+          AND b.status::text IN (${Prisma.join([...statuses])})
+          AND b.period && ${range(from, to)}
+        ORDER BY lower(b.period)`,
+    );
+  }
+
+  // Job eligibility. Each mirrors a predicate in src/domain/checkin-rules.ts
+  // (which transitionBooking re-checks under the row lock): the SQL only
+  // narrows the candidates.
+
+  /** approved, now > start + grace, never checked in. */
+  async listNoShowDue(now: Date, graceMs: number, limit: number): Promise<string[]> {
+    const cutoff = new Date(now.getTime() - graceMs);
+    return idRows.parse(
+      await this.db.$queryRaw`
+        SELECT b.id::text AS id FROM bookings b
+        WHERE b.status = 'approved'
+          AND lower(b.period) < ${cutoff.toISOString()}::timestamptz
+          AND NOT EXISTS (SELECT 1 FROM checkins c WHERE c.booking_id = b.id)
+        ORDER BY lower(b.period)
+        LIMIT ${limit}`,
+    ).map((r) => r.id);
+  }
+
+  /** checked_in, now > end + tolerance. */
+  async listAutoCompleteDue(now: Date, toleranceMs: number, limit: number): Promise<string[]> {
+    const cutoff = new Date(now.getTime() - toleranceMs);
+    return idRows.parse(
+      await this.db.$queryRaw`
+        SELECT b.id::text AS id FROM bookings b
+        WHERE b.status = 'checked_in' AND upper(b.period) < ${cutoff.toISOString()}::timestamptz
+        ORDER BY upper(b.period)
+        LIMIT ${limit}`,
+    ).map((r) => r.id);
+  }
+
+  /** pending, start has passed (it can no longer be approved). */
+  async listLapsedPending(now: Date, limit: number): Promise<string[]> {
+    return idRows.parse(
+      await this.db.$queryRaw`
+        SELECT b.id::text AS id FROM bookings b
+        WHERE b.status = 'pending' AND lower(b.period) <= ${now.toISOString()}::timestamptz
+        ORDER BY lower(b.period)
+        LIMIT ${limit}`,
+    ).map((r) => r.id);
   }
 
   /** Slot-holding bookings (pending/approved/checked_in) overlapping [from, to). */

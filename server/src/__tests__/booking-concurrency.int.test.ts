@@ -178,6 +178,7 @@ describe("booking concurrency", () => {
       const config = testConfig(inject("databaseUrl"));
       const app = createApp({
         config,
+        redis: h.redis,
         logger: createLogger("silent"),
         services: createServices(contended, config, { uow: barrierUow }),
       });

@@ -195,3 +195,32 @@ describe("policy: approvalInboxScope", () => {
     expect(approvalInboxScope(actor("student"))).toEqual({ kind: "ownedBy", userId: "student-1" });
   });
 });
+
+describe("policy: check-in", () => {
+  const booking = (userId: string, departmentId = DEPT_A) => ({
+    id: "b-1",
+    userId,
+    status: "approved" as const,
+    resource: { id: "r-1", departmentId, ownerIds: ["owner-1"] },
+  });
+
+  it("checkin:create is the booker only", () => {
+    expect(can(actor("student"), "checkin:create", { bookingUserId: "student-1" })).toBe(true);
+    expect(can(actor("student"), "checkin:create", { bookingUserId: "someone-else" })).toBe(false);
+    expect(can(actor("admin"), "checkin:create", { bookingUserId: "someone-else" })).toBe(false);
+  });
+
+  it("checkin:override is the resource owner or a same-department admin, never on your own booking", () => {
+    expect(can(actor("faculty", { id: "owner-1" }), "checkin:override", booking("s"))).toBe(true);
+    expect(can(actor("admin"), "checkin:override", booking("s"))).toBe(true);
+    expect(can(actor("admin"), "checkin:override", booking("s", DEPT_B))).toBe(false);
+    expect(can(actor("faculty"), "checkin:override", booking("s"))).toBe(false);
+    expect(can(actor("faculty", { id: "owner-1" }), "checkin:override", booking("owner-1"))).toBe(false);
+  });
+
+  it("explains override denials", () => {
+    expect(denial(actor("faculty"), "checkin:override", booking("s")).code).toBe("NOT_FOUND");
+    expect(denial(actor("admin"), "checkin:override", booking("s", DEPT_B)).code).toBe("WRONG_DEPARTMENT");
+    expect(denial(actor("student"), "checkin:override", booking("student-1")).code).toBe("FORBIDDEN");
+  });
+});

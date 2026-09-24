@@ -5,10 +5,13 @@ import { pinoHttp } from "pino-http";
 import type { AppConfig } from "./config/env.js";
 import type { Services } from "./container.js";
 import { errorHandler, notFoundHandler } from "./http/errors.js";
+import { createFixedWindowLimiter } from "./http/rate-limit.js";
 import type { Logger } from "./lib/logger.js";
+import type { Redis } from "./lib/redis.js";
 import { authRouter } from "./routes/auth.routes.js";
 import { departmentsRouter } from "./routes/departments.routes.js";
 import { bookingsRouter } from "./routes/bookings.routes.js";
+import { checkinRouter } from "./routes/checkin.routes.js";
 import { resourcesRouter } from "./routes/resources.routes.js";
 import { usersRouter } from "./routes/users.routes.js";
 
@@ -16,9 +19,13 @@ export interface AppDeps {
   config: AppConfig;
   services: Services;
   logger: Logger;
+  redis: Redis;
 }
 
-export function createApp({ config, services, logger }: AppDeps): Express {
+/** §7: at most 5 scans per user per resource per minute. */
+export const SCAN_RATE_LIMIT = { limit: 5, windowMs: 60_000 } as const;
+
+export function createApp({ config, services, logger, redis }: AppDeps): Express {
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", 1);
@@ -39,8 +46,17 @@ export function createApp({ config, services, logger }: AppDeps): Express {
   app.use("/api/auth", authRouter(services.auth, cookie));
   app.use("/api/departments", departmentsRouter(services.departments));
   app.use("/api/users", usersRouter(services.auth, services.users));
-  app.use("/api/resources", resourcesRouter(services.auth, services.resources, services.bookings));
+  app.use("/api/resources", resourcesRouter(services.auth, services.resources, services.bookings, services.checkins));
   app.use("/api/bookings", bookingsRouter(services.auth, services.bookings, services.resources));
+  app.use(
+    "/api/checkin",
+    checkinRouter(
+      services.auth,
+      services.checkins,
+      services.bookings,
+      createFixedWindowLimiter(redis, { prefix: "ratelimit:checkin", ...SCAN_RATE_LIMIT }),
+    ),
+  );
 
   app.use(notFoundHandler);
   app.use(errorHandler(logger));

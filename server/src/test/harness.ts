@@ -3,23 +3,47 @@ import request from "supertest";
 import { inject } from "vitest";
 import { createApp } from "../app.js";
 import type { AppConfig } from "../config/env.js";
-import { createServices } from "../container.js";
+import { createServices, type Services } from "../container.js";
 import { createPrismaClient, type PrismaClient } from "../db/prisma.js";
 import type { UserRole } from "../domain/types.js";
 import { createLogger } from "../lib/logger.js";
+import { createRedis, type Redis } from "../lib/redis.js";
 
 export interface TestHarness {
   app: Express;
   prisma: PrismaClient;
+  redis: Redis;
+  services: Services;
   close(): Promise<void>;
 }
 
-export function createHarness(): TestHarness {
+/** A clock tests can move: pass `clock.now` to createHarness, then `clock.set(...)`. */
+export interface TestClock {
+  now: () => Date;
+  set(at: Date): void;
+}
+
+export function createTestClock(initial: Date = new Date()): TestClock {
+  let current = new Date(initial);
+  return { now: () => new Date(current), set: (at) => (current = new Date(at)) };
+}
+
+export function createHarness(opts: { clock?: () => Date } = {}): TestHarness {
   const databaseUrl = inject("databaseUrl");
   const config = testConfig(databaseUrl);
   const prisma = createPrismaClient(databaseUrl);
-  const app = createApp({ config, logger: createLogger("silent"), services: createServices(prisma, config) });
-  return { app, prisma, close: () => prisma.$disconnect() };
+  const redis = createRedis(inject("redisUrl"));
+  const services = createServices(prisma, config, opts.clock ? { clock: opts.clock } : {});
+  const app = createApp({ config, logger: createLogger("silent"), services, redis });
+  return {
+    app,
+    prisma,
+    redis,
+    services,
+    close: async () => {
+      await Promise.all([prisma.$disconnect(), redis.quit()]);
+    },
+  };
 }
 
 export function testConfig(databaseUrl: string): AppConfig {
@@ -34,12 +58,15 @@ export function testConfig(databaseUrl: string): AppConfig {
     corsOrigin: "http://localhost:5173",
     bcryptRounds: 4,
     logLevel: "silent",
+    redisUrl: inject("redisUrl"),
+    publicAppUrl: "https://labdesk.test",
+    jobsEnabled: false,
   };
 }
 
 export async function resetDatabase(prisma: PrismaClient): Promise<void> {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "audit_log", "booking_approvals", "bookings", "maintenance_windows", "refresh_tokens", "resource_owners", "resources", "users", "departments" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "audit_log", "checkins", "booking_approvals", "bookings", "maintenance_windows", "refresh_tokens", "resource_owners", "resources", "users", "departments" RESTART IDENTITY CASCADE',
   );
 }
 
@@ -159,3 +186,30 @@ export async function createMaintenanceWindow(
     INSERT INTO maintenance_windows (resource_id, period, reason, created_by)
     VALUES (${w.resourceId}::uuid, tstzrange(${w.start}::timestamptz, ${w.end}::timestamptz, '[)'), 'test', ${w.createdBy}::uuid)`;
 }
+
+/** Clears rate-limit counters and job locks between tests. */
+export async function resetRedis(redis: Redis): Promise<void> {
+  await redis.flushdb();
+}
+
+/**
+ * Inserts a booking directly, at any time and in any status, so tests can
+ * place periods relative to a test clock (the API refuses past starts).
+ */
+export async function insertBooking(
+  prisma: PrismaClient,
+  b: { resourceId: string; userId: string; start: Date; end: Date; status: string },
+): Promise<string> {
+  const [row] = await prisma.$queryRaw<{ id: string }[]>`
+    INSERT INTO bookings (resource_id, user_id, period, status)
+    VALUES (
+      ${b.resourceId}::uuid,
+      ${b.userId}::uuid,
+      tstzrange(${b.start.toISOString()}::timestamptz, ${b.end.toISOString()}::timestamptz, '[)'),
+      ${b.status}::booking_status
+    )
+    RETURNING id::text AS id`;
+  if (!row) throw new Error("insertBooking returned no row");
+  return row.id;
+}
+

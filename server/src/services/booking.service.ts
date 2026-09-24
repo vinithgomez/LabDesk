@@ -1,6 +1,16 @@
 import { approvalProgress, isStalled, type ApprovalProgress } from "../domain/approvals.js";
 import type { AuditAction } from "../domain/audit.js";
 import { assertBookableSlot } from "../domain/booking-rules.js";
+import {
+  CHECKIN_TOLERANCE_MS,
+  checkInWindow,
+  checkOutWindow,
+  isAutoCompleteDue,
+  isLapsedPending,
+  isNoShowDue,
+  isWithin,
+  NO_SHOW_GRACE_MS,
+} from "../domain/checkin-rules.js";
 import { bookingNotFound, DomainError, resourceNotFound } from "../domain/errors.js";
 import type {
   Actor,
@@ -9,12 +19,14 @@ import type {
   BookingApproval,
   BookingListScope,
   BookingStatus,
+  Checkin,
+  CheckinMethod,
   Resource,
 } from "../domain/types.js";
 import type { BookingListFilter, HeldSlot } from "../repositories/booking.repository.js";
 import { IDEMPOTENCY_INDEX } from "../repositories/booking.repository.js";
 import { ConstraintViolation } from "../repositories/constraint-violation.js";
-import type { UnitOfWork } from "../repositories/index.js";
+import type { TxRepositories, UnitOfWork } from "../repositories/index.js";
 import type { MaintenanceSlot } from "../repositories/maintenance.repository.js";
 
 export type { BookingListFilter };
@@ -75,11 +87,27 @@ export interface Availability {
 }
 
 /**
- * The booking state machine (CLAUDE.md §5). Phases 2–3 implement cancel,
- * approve and reject; Phase 4 adds check-in/out and the no-show sweeper.
+ * The booking state machine (CLAUDE.md §5). User actions: cancel, approve,
+ * reject, checkin, checkout. System actions (actor null, run by jobs):
+ * no_show, auto_complete, expire.
  */
-export type BookingAction = "cancel" | "approve" | "reject";
-export type DecisionAction = Exclude<BookingAction, "cancel">;
+export type BookingAction =
+  | "cancel"
+  | "approve"
+  | "reject"
+  | "checkin"
+  | "checkout"
+  | "no_show"
+  | "auto_complete"
+  | "expire";
+export type DecisionAction = "approve" | "reject";
+export type AttendanceAction = "checkin" | "checkout";
+export type SystemAction = "no_show" | "auto_complete" | "expire";
+
+export interface AttendanceInput {
+  /** 'manual_override' records the acting staff member as overridden_by. */
+  method: CheckinMethod;
+}
 
 const TRANSITIONS: Record<BookingAction, { from: readonly BookingStatus[]; to: BookingStatus }> = {
   // Cancel is forbidden once checked_in or completed (§5); terminal states stay terminal.
@@ -89,7 +117,32 @@ const TRANSITIONS: Record<BookingAction, { from: readonly BookingStatus[]; to: B
   approve: { from: ["pending"], to: "approved" },
   // A rejection at any level is final; it never falls through to the next level.
   reject: { from: ["pending"], to: "rejected" },
+  checkin: { from: ["approved"], to: "checked_in" },
+  checkout: { from: ["checked_in"], to: "completed" },
+  // Sweeper: approved, never checked in, past start + grace.
+  no_show: { from: ["approved"], to: "no_show" },
+  // Checked in but never checked out, past end + tolerance.
+  auto_complete: { from: ["checked_in"], to: "completed" },
+  // A pending booking that reached its start undecided: 'rejected' (not
+  // approved in time), which also frees the slot. No approval row is written;
+  // approvals are human decisions.
+  expire: { from: ["pending"], to: "rejected" },
 };
+
+/** What one scheduled-job run did. A second run on unchanged data reports changed: 0. */
+export interface JobResult {
+  /** Rows the eligibility query returned. */
+  candidates: number;
+  /** Rows actually transitioned. */
+  changed: number;
+  /** Candidates that were no longer eligible under the row lock (raced). */
+  skipped: number;
+  /** Candidates whose transition failed unexpectedly (logged, not retried). */
+  failed: number;
+}
+
+/** Upper bound on rows one job run processes; the next run picks up the rest. */
+const JOB_BATCH_SIZE = 500;
 
 /** SQLSTATE 23P01 — exclusion_violation. */
 const EXCLUSION_VIOLATION = "23P01";
@@ -237,19 +290,28 @@ export class BookingService {
 
   /**
    * The single place a booking's status changes (§5), and the only writer of
-   * approval decisions. Callers must have passed the matching `can()` check
-   * first (booking:cancel, or booking:approve for approve/reject).
+   * approval decisions and check-in rows. Callers must have passed the
+   * matching `can()` check first (booking:cancel, booking:approve,
+   * checkin:create / checkin:override); system actions are run by jobs.
    *
-   * Runs under a FOR UPDATE lock on the booking, so concurrent decisions on
-   * one booking serialize and each sees the other's result.
+   * Runs under a FOR UPDATE lock on the booking, so concurrent transitions on
+   * one booking serialize and each sees the other's result. Every
+   * time-dependent precondition is re-checked here, under the lock.
    */
   transitionBooking(bookingId: string, action: "cancel", actor: Actor): Promise<Booking>;
   transitionBooking(bookingId: string, action: DecisionAction, actor: Actor, decision: DecisionInput): Promise<Booking>;
   transitionBooking(
     bookingId: string,
-    action: BookingAction,
+    action: AttendanceAction,
     actor: Actor,
-    decision?: DecisionInput,
+    attendance: AttendanceInput,
+  ): Promise<Booking>;
+  transitionBooking(bookingId: string, action: SystemAction, actor: null): Promise<Booking>;
+  transitionBooking(
+    bookingId: string,
+    action: BookingAction,
+    actor: Actor | null,
+    input?: DecisionInput | AttendanceInput,
   ): Promise<Booking> {
     const rule = TRANSITIONS[action];
     return this.uow.transaction(async (tx) => {
@@ -259,73 +321,228 @@ export class BookingService {
       if (!rule.from.includes(before.status)) {
         throw new DomainError("INVALID_TRANSITION", `Cannot ${action} a booking that is ${before.status}`);
       }
+      const step = { tx, before, to: rule.to, now: this.now() };
 
-      if (action === "cancel") {
-        const after = await tx.bookings.updateStatus(bookingId, rule.to);
-        await tx.writeAudit({
-          actorId: actor.id,
-          entityType: "booking",
-          entityId: bookingId,
-          action: "booking.cancelled",
-          before,
-          after,
-        });
-        // Phase 5: freeing a slot triggers waitlist promotion here.
-        return after;
+      switch (action) {
+        case "cancel":
+          return this.applyCancel(step, requireActor(actor, action));
+        case "approve":
+        case "reject":
+          return this.applyDecision(step, action, requireActor(actor, action), requireDecision(input, action));
+        case "checkin":
+        case "checkout":
+          return this.applyAttendance(step, action, requireActor(actor, action), requireAttendance(input, action));
+        case "no_show":
+        case "auto_complete":
+        case "expire":
+          return this.applySystem(step, action);
       }
+    });
+  }
 
-      if (!decision) throw new Error(`${action} requires a decision`);
-      const resource = await tx.resources.findById(before.resourceId);
-      if (!resource) throw bookingNotFound();
-      const approvals = await tx.approvals.listForBooking(bookingId);
-      const progress = approvalProgress(resource, approvals);
+  private async applyCancel(step: TransitionStep, actor: Actor): Promise<Booking> {
+    const { tx, before, to } = step;
+    const after = await tx.bookings.updateStatus(before.id, to);
+    await tx.writeAudit({
+      actorId: actor.id,
+      entityType: "booking",
+      entityId: before.id,
+      action: "booking.cancelled",
+      before,
+      after,
+    });
+    // Phase 5: freeing a slot triggers waitlist promotion here.
+    return after;
+  }
 
-      // The caller was authorized for a specific level. If another decision
-      // landed first, that authorization no longer describes this booking.
-      if (progress.nextLevel === null || progress.nextLevel !== decision.level) {
+  private async applyDecision(
+    step: TransitionStep,
+    action: DecisionAction,
+    actor: Actor,
+    decision: DecisionInput,
+  ): Promise<Booking> {
+    const { tx, before, to, now } = step;
+    const resource = await tx.resources.findById(before.resourceId);
+    if (!resource) throw bookingNotFound();
+    const approvals = await tx.approvals.listForBooking(before.id);
+    const progress = approvalProgress(resource, approvals);
+
+    // The caller was authorized for a specific level. If another decision
+    // landed first, that authorization no longer describes this booking.
+    if (progress.nextLevel === null || progress.nextLevel !== decision.level) {
+      throw new DomainError(
+        "INVALID_TRANSITION",
+        "This booking's approval state changed while you were deciding; reload and try again",
+      );
+    }
+    // A pending booking whose start has passed can't usefully be approved;
+    // it can still be rejected, which closes it out.
+    if (action === "approve" && isLapsedPending(before, now)) {
+      throw new DomainError("INVALID_TRANSITION", "This booking has already started and can no longer be approved");
+    }
+
+    let approval: BookingApproval;
+    try {
+      approval = await tx.approvals.insert({
+        bookingId: before.id,
+        level: progress.nextLevel,
+        approverId: actor.id,
+        decision: action === "approve" ? "approved" : "rejected",
+        comment: decision.comment,
+      });
+    } catch (err) {
+      if (err instanceof ConstraintViolation && err.sqlState === UNIQUE_VIOLATION) {
+        // Backstop for UNIQUE(booking_id, level) / (booking_id, approver_id).
+        throw new DomainError("INVALID_TRANSITION", "This approval decision has already been made");
+      }
+      throw err;
+    }
+
+    const final = action === "reject" || progress.nextLevel === progress.requiredLevels;
+    const after = final ? await tx.bookings.updateStatus(before.id, to) : before;
+    const auditAction: AuditAction =
+      action === "reject" ? "booking.rejected" : final ? "booking.approved" : "booking.level_approved";
+    await tx.writeAudit({
+      actorId: actor.id,
+      entityType: "booking",
+      entityId: before.id,
+      action: auditAction,
+      before: { ...before, approvals },
+      after: { ...after, approvals: [...approvals, approval] },
+    });
+    // Phase 5: a rejection frees the slot and triggers waitlist promotion here.
+    return after;
+  }
+
+  /** First scan -> checked_in; second scan during the session -> completed (§7). */
+  private async applyAttendance(
+    step: TransitionStep,
+    action: AttendanceAction,
+    actor: Actor,
+    attendance: AttendanceInput,
+  ): Promise<Booking> {
+    const { tx, before, to, now } = step;
+    const overriddenBy = attendance.method === "manual_override" ? actor.id : null;
+    const existing = await tx.checkins.findByBookingId(before.id);
+
+    let checkin: Checkin;
+    if (action === "checkin") {
+      const window = checkInWindow(before);
+      if (!isWithin(window, now)) {
         throw new DomainError(
           "INVALID_TRANSITION",
-          "This booking's approval state changed while you were deciding; reload and try again",
+          `Check-in is open from ${window.opensAt.toISOString()} to ${window.closesAt.toISOString()}`,
         );
       }
-      // A pending booking whose start has passed can't usefully be approved;
-      // it can still be rejected, which closes it out.
-      if (action === "approve" && this.now().getTime() >= before.startsAt.getTime()) {
-        throw new DomainError("INVALID_TRANSITION", "This booking has already started and can no longer be approved");
+      if (existing) throw new DomainError("INVALID_TRANSITION", "This booking has already been checked in");
+      checkin = await tx.checkins.checkIn({ bookingId: before.id, at: now, method: attendance.method, overriddenBy });
+    } else {
+      const window = checkOutWindow(before);
+      if (!existing) throw new DomainError("INVALID_TRANSITION", "This booking was never checked in");
+      if (!isWithin(window, now)) {
+        throw new DomainError("INVALID_TRANSITION", `Check-out closed at ${window.closesAt.toISOString()}`);
       }
+      checkin = await tx.checkins.checkOut({ bookingId: before.id, at: now, method: attendance.method, overriddenBy });
+    }
 
-      let approval: BookingApproval;
-      try {
-        approval = await tx.approvals.insert({
-          bookingId,
-          level: progress.nextLevel,
-          approverId: actor.id,
-          decision: action === "approve" ? "approved" : "rejected",
-          comment: decision.comment,
-        });
-      } catch (err) {
-        if (err instanceof ConstraintViolation && err.sqlState === UNIQUE_VIOLATION) {
-          // Backstop for UNIQUE(booking_id, level) / (booking_id, approver_id).
-          throw new DomainError("INVALID_TRANSITION", "This approval decision has already been made");
-        }
-        throw err;
-      }
-
-      const final = action === "reject" || progress.nextLevel === progress.requiredLevels;
-      const after = final ? await tx.bookings.updateStatus(bookingId, rule.to) : before;
-      const auditAction: AuditAction =
-        action === "reject" ? "booking.rejected" : final ? "booking.approved" : "booking.level_approved";
-      await tx.writeAudit({
-        actorId: actor.id,
-        entityType: "booking",
-        entityId: bookingId,
-        action: auditAction,
-        before: { ...before, approvals },
-        after: { ...after, approvals: [...approvals, approval] },
-      });
-      // Phase 5: a rejection frees the slot and triggers waitlist promotion here.
-      return after;
+    const after = await tx.bookings.updateStatus(before.id, to);
+    const manual = attendance.method === "manual_override";
+    await tx.writeAudit({
+      actorId: actor.id,
+      entityType: "booking",
+      entityId: before.id,
+      action:
+        action === "checkin"
+          ? manual
+            ? "booking.checkin_overridden"
+            : "booking.checked_in"
+          : manual
+            ? "booking.checkout_overridden"
+            : "booking.checked_out",
+      before: { ...before, checkin: existing },
+      after: { ...after, checkin },
     });
+    return after;
+  }
+
+  /** Job-driven transitions: audited with actor_id null. */
+  private async applySystem(step: TransitionStep, action: SystemAction): Promise<Booking> {
+    const { tx, before, to, now } = step;
+    const existing = await tx.checkins.findByBookingId(before.id);
+    let checkin: Checkin | null = existing;
+    let auditAction: AuditAction;
+
+    switch (action) {
+      case "no_show":
+        if (!isNoShowDue(before, now) || existing) {
+          throw new DomainError("INVALID_TRANSITION", "This booking is not (or no longer) a no-show");
+        }
+        auditAction = "booking.no_show";
+        break;
+      case "auto_complete":
+        if (!isAutoCompleteDue(before, now) || !existing) {
+          throw new DomainError("INVALID_TRANSITION", "This session is not due for auto-completion");
+        }
+        // The session is closed at the booked end, not at the time the job ran.
+        checkin = await tx.checkins.checkOut({ bookingId: before.id, at: before.endsAt, method: "auto", overriddenBy: null });
+        auditAction = "booking.auto_completed";
+        break;
+      case "expire":
+        if (!isLapsedPending(before, now)) {
+          throw new DomainError("INVALID_TRANSITION", "This booking has not reached its start yet");
+        }
+        auditAction = "booking.expired";
+        break;
+    }
+
+    const after = await tx.bookings.updateStatus(before.id, to);
+    await tx.writeAudit({
+      actorId: null,
+      entityType: "booking",
+      entityId: before.id,
+      action: auditAction,
+      before: { ...before, checkin: existing },
+      after: { ...after, checkin },
+    });
+    // Phase 5: no_show and expire free the slot; waitlist promotion hooks in here.
+    return after;
+  }
+
+  /** No-show sweeper (§8): approved bookings never checked in, past start + grace. */
+  async runNoShowSweep(): Promise<JobResult> {
+    const ids = await this.uow.read.bookings.listNoShowDue(this.now(), NO_SHOW_GRACE_MS, JOB_BATCH_SIZE);
+    return this.transitionEach(ids, "no_show");
+  }
+
+  /** Auto-complete (§8): checked-in sessions never checked out, past end + tolerance. */
+  async runAutoComplete(): Promise<JobResult> {
+    const ids = await this.uow.read.bookings.listAutoCompleteDue(this.now(), CHECKIN_TOLERANCE_MS, JOB_BATCH_SIZE);
+    return this.transitionEach(ids, "auto_complete");
+  }
+
+  /** Lapsed-pending expiry (§2c): pending bookings that reached their start undecided. */
+  async runLapsedPendingExpiry(): Promise<JobResult> {
+    const ids = await this.uow.read.bookings.listLapsedPending(this.now(), JOB_BATCH_SIZE);
+    return this.transitionEach(ids, "expire");
+  }
+
+  /**
+   * One transaction per booking, so one failure never rolls back the rest.
+   * Idempotent: eligibility is re-checked under each row lock, and a booking
+   * that no longer qualifies is skipped, so a second run changes nothing.
+   */
+  private async transitionEach(ids: readonly string[], action: SystemAction): Promise<JobResult> {
+    const result: JobResult = { candidates: ids.length, changed: 0, skipped: 0, failed: 0 };
+    for (const id of ids) {
+      try {
+        await this.transitionBooking(id, action, null);
+        result.changed += 1;
+      } catch (err) {
+        if (err instanceof DomainError && err.code === "INVALID_TRANSITION") result.skipped += 1;
+        else result.failed += 1;
+      }
+    }
+    return result;
   }
 
   /** Slot-holding bookings and maintenance windows overlapping [from, to). */
@@ -385,3 +602,26 @@ function isIdempotencyViolation(err: unknown): boolean {
     err.constraint === IDEMPOTENCY_INDEX
   );
 }
+
+interface TransitionStep {
+  tx: TxRepositories;
+  before: Booking;
+  to: BookingStatus;
+  now: Date;
+}
+
+function requireActor(actor: Actor | null, action: BookingAction): Actor {
+  if (!actor) throw new Error(`${action} requires an actor`);
+  return actor;
+}
+
+function requireDecision(input: DecisionInput | AttendanceInput | undefined, action: BookingAction): DecisionInput {
+  if (!input || !("level" in input)) throw new Error(`${action} requires a decision`);
+  return input;
+}
+
+function requireAttendance(input: DecisionInput | AttendanceInput | undefined, action: BookingAction): AttendanceInput {
+  if (!input || !("method" in input)) throw new Error(`${action} requires an attendance method`);
+  return input;
+}
+

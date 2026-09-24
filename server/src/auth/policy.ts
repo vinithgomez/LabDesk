@@ -59,6 +59,11 @@ export interface ApprovalSubject extends BookingSubject {
   deciderIds: readonly string[];
 }
 
+/** Subject for `checkin:create`: the booking the caller's scan resolved to. */
+export interface CheckinSubject {
+  bookingUserId: string;
+}
+
 export interface PolicySubjects {
   "resource:view": ResourceViewSubject;
   "resource:manage": ResourceManageSubject;
@@ -68,6 +73,8 @@ export interface PolicySubjects {
   "booking:view": BookingSubject;
   "booking:cancel": BookingSubject;
   "booking:approve": ApprovalSubject;
+  "checkin:create": CheckinSubject;
+  "checkin:override": BookingSubject;
 }
 
 export type Action = keyof PolicySubjects;
@@ -134,6 +141,19 @@ const rules: { [A in Action]: Rule<A> } = {
       (o) => o.userId === actor.id && (s.nextLevel === null || o.approvalLevel === s.nextLevel),
     );
   },
+
+  // Implicit via booking ownership: you scan yourself in, nobody else.
+  "checkin:create": (actor, s) => s.bookingUserId === actor.id,
+
+  // §6: resource owner or admin — an admin only within their own department
+  // (as for approvals). Never on your own booking: an override stands in for
+  // a scan by someone physically present, so staff scan their own bookings
+  // like everyone else.
+  "checkin:override": (actor, b) => {
+    if (b.userId === actor.id) return false;
+    if (b.resource.departmentId !== actor.departmentId) return false;
+    return isAdmin(actor) || ownsResource(actor, b.resource);
+  },
 };
 
 export function can<A extends Action>(actor: Actor, action: A, subject: PolicySubjects[A]): boolean {
@@ -199,6 +219,16 @@ const denials: { [A in Action]?: Denial<A> } = {
   // A booking you may not see is indistinguishable from one that doesn't exist.
   "booking:view": () => bookingNotFound(),
   "booking:cancel": (actor, b) => (can(actor, "booking:view", b) ? null : bookingNotFound()),
+  "checkin:override": (actor, b) => {
+    if (!can(actor, "booking:view", b)) return bookingNotFound();
+    if (b.resource.departmentId !== actor.departmentId) {
+      return new DomainError("WRONG_DEPARTMENT", "You can only override check-ins in your own department");
+    }
+    if (b.userId === actor.id) {
+      return new DomainError("FORBIDDEN", "You cannot override check-in on your own booking; scan the QR code instead");
+    }
+    return null;
+  },
   "booking:approve": (actor, s) => {
     if (!can(actor, "booking:view", s)) return bookingNotFound();
     if (s.resource.departmentId !== actor.departmentId) {

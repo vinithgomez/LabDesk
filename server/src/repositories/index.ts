@@ -4,6 +4,7 @@ import type { AuditEntry } from "../domain/audit.js";
 import { ApprovalReader, ApprovalWriter } from "./approval.repository.js";
 import { AuditRepository } from "./audit.repository.js";
 import { BookingReader, BookingWriter } from "./booking.repository.js";
+import { CheckinReader, CheckinWriter } from "./checkin.repository.js";
 import { DepartmentRepository } from "./department.repository.js";
 import { MaintenanceRepository } from "./maintenance.repository.js";
 import { RefreshTokenRepository } from "./refresh-token.repository.js";
@@ -12,13 +13,14 @@ import { UserReader, UserWriter } from "./user.repository.js";
 
 export interface Repositories {
   departments: DepartmentRepository;
-  // users, resources, bookings and approvals are read-only here: their
-  // writes and row locks need a transaction (see TxRepositories).
+  // users, resources, bookings, approvals and checkins are read-only here:
+  // their writes and row locks need a transaction (see TxRepositories).
   users: UserReader;
   refreshTokens: RefreshTokenRepository;
   resources: ResourceReader;
   bookings: BookingReader;
   approvals: ApprovalReader;
+  checkins: CheckinReader;
   maintenance: MaintenanceRepository;
 }
 
@@ -36,6 +38,7 @@ export interface TxRepositories extends Repositories {
   resources: ResourceWriter;
   bookings: BookingWriter;
   approvals: ApprovalWriter;
+  checkins: CheckinWriter;
   writeAudit(entry: AuditEntry): Promise<void>;
 }
 
@@ -47,6 +50,7 @@ export function createRepositories(db: DbClient): Repositories {
     resources: new ResourceReader(db),
     bookings: new BookingReader(db),
     approvals: new ApprovalReader(db),
+    checkins: new CheckinReader(db),
     maintenance: new MaintenanceRepository(db),
   };
 }
@@ -59,6 +63,7 @@ export function createTxRepositories(tx: TxClient): TxRepositories {
     resources: new ResourceWriter(tx),
     bookings: new BookingWriter(tx),
     approvals: new ApprovalWriter(tx),
+    checkins: new CheckinWriter(tx),
     writeAudit: (entry) => audit.insert(entry),
   };
 }
