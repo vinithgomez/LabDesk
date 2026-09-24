@@ -13,7 +13,14 @@ See `CLAUDE.md` for the full specification.
 5. `npm run db:seed` — two departments (CSE, ECE), the bootstrap admin from
    `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`, demo faculty / lab in-charges /
    students (password `SEED_USER_PASSWORD`) and resources in both departments
-6. `npm run dev` — API on http://localhost:4000
+6. `npm run dev` — API on http://localhost:4000 (also runs the scheduled jobs)
+7. `cd ../client && npm install && npm run dev` — the PWA on http://localhost:5173,
+   proxying `/api` to the API. `/scan` is the in-app QR scanner; a printed
+   code opens `/checkin?r=…&sig=…` directly from the phone's camera.
+
+Print a resource's check-in code with `GET /api/resources/:id/qr` (owner or
+admin). The code is static: it stays valid for the resource's lifetime, as long
+as `PUBLIC_APP_URL` doesn't change.
 
 ## Tests
 
