@@ -8,6 +8,7 @@ import { BookingService } from "./services/booking.service.js";
 import { CheckinService } from "./services/checkin.service.js";
 import { DepartmentService } from "./services/department.service.js";
 import { ResourceService } from "./services/resource.service.js";
+import { SeriesService } from "./services/series.service.js";
 import { UserService } from "./services/user.service.js";
 import { WaitlistService } from "./services/waitlist.service.js";
 
@@ -19,6 +20,7 @@ export interface Services {
   bookings: BookingService;
   checkins: CheckinService;
   waitlist: WaitlistService;
+  series: SeriesService;
 }
 
 export interface ServiceOverrides {
@@ -50,5 +52,6 @@ export function createServices(prisma: PrismaClient, config: AppConfig, override
     bookings,
     checkins: new CheckinService(uow, config.publicAppUrl, clock),
     waitlist: new WaitlistService(uow, bookings, clock),
+    series: new SeriesService(uow, bookings, clock),
   };
 }

@@ -2,6 +2,7 @@ import cron, { type ScheduledTask } from "node-cron";
 import type { Logger } from "../lib/logger.js";
 import type { Redis } from "../lib/redis.js";
 import type { BookingService } from "../services/booking.service.js";
+import type { SeriesService } from "../services/series.service.js";
 import type { WaitlistService } from "../services/waitlist.service.js";
 import { withJobLock, type LockedRun } from "./job-lock.js";
 
@@ -9,6 +10,7 @@ import { withJobLock, type LockedRun } from "./job-lock.js";
 export interface JobServices {
   bookings: BookingService;
   waitlist: WaitlistService;
+  series: SeriesService;
 }
 
 /** A run's counters, logged as-is. */
@@ -18,6 +20,8 @@ export interface JobDefinition {
   /** Also the Redis lock key suffix: lock:<name>. */
   name: string;
   cron: string;
+  /** IANA zone for the cron expression; the server's local zone when absent. */
+  timezone?: string;
   /**
    * Lock TTL. Comfortably above the expected run time, and below the
    * interval, so a crashed holder never costs more than the next tick.
@@ -59,6 +63,15 @@ export const JOBS: readonly JobDefinition[] = [
     ttlMs: 2 * 60_000,
     run: (s) => s.waitlist.runExpiry(),
   },
+  {
+    // Nightly, just after IST midnight, when the booking horizon has moved
+    // forward by a day.
+    name: "series-materializer",
+    cron: "15 0 * * *",
+    timezone: "Asia/Kolkata",
+    ttlMs: 30 * 60_000,
+    run: (s) => s.series.runMaterializer(),
+  },
 ];
 
 /** One locked execution of a job: runs only if no other instance holds its lock. */
@@ -88,7 +101,7 @@ export function startScheduler(deps: { redis: Redis; services: JobServices; logg
           deps.logger.error({ job: job.name, err }, "job failed");
         }
       },
-      { name: job.name, noOverlap: true },
+      { name: job.name, noOverlap: true, ...(job.timezone ? { timezone: job.timezone } : {}) },
     ),
   );
   return async () => {

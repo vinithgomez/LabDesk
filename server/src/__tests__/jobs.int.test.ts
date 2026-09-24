@@ -217,7 +217,11 @@ describe("Redis job lock", () => {
     expect(new Set(JOBS.map((j) => j.name)).size).toBe(JOBS.length);
     for (const j of JOBS) {
       expect(cron.validate(j.cron)).toBe(true);
-      const intervalMin = Number(/^\*\/(\d+) /.exec(j.cron)?.[1]);
+      // "*/N * * * *" runs every N minutes; "M H * * *" runs once a day.
+      const everyN = /^\*\/(\d+) \* \* \* \*$/.exec(j.cron)?.[1];
+      const daily = /^\d+ \d+ \* \* \*$/.test(j.cron);
+      expect(everyN !== undefined || daily, `${j.name}: unrecognised schedule ${j.cron}`).toBe(true);
+      const intervalMin = everyN !== undefined ? Number(everyN) : 24 * 60;
       expect(j.ttlMs).toBeLessThan(intervalMin * MIN);
     }
   });
