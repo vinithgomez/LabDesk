@@ -5,6 +5,7 @@ build/
 coverage/
 .cache/
 tmp/
+*.tsbuildinfo
 
 # Environment and secrets (.env.example is the only env file tracked)
 .env

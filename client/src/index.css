@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+html {
+  color-scheme: dark;
+}
+
+/* html5-qrcode injects a <video>; make it fill the viewfinder. */
+#qr-scan-region video {
+  width: 100%;
+  height: auto;
+  display: block;
+}
