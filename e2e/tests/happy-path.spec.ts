@@ -15,19 +15,22 @@ interface Booking {
 
 const E2E_RESOURCE = "E2E Lab";
 const MIN = 60_000;
-const istDate = (d: Date) => new Date(d.getTime() + 330 * MIN).toISOString().slice(0, 10);
+const ist = (d: Date) => new Date(d.getTime() + 330 * MIN);
+const istDate = (d: Date) => ist(d).toISOString().slice(0, 10);
+/** Open all day, every day, so the calendar always has a bookable slot at "now". */
+const ALWAYS_OPEN = { businessHoursStart: "00:00", businessHoursEnd: "23:59", businessDays: [0, 1, 2, 3, 4, 5, 6] };
 
 /**
  * The happy path, end to end on the running stack: register, sign in through
- * the UI, book a slot, have the resource owner approve it, check in through
- * the resource's signed QR link, and check out through the same link.
+ * the UI, book the slot starting now by dragging on the week calendar, have
+ * the resource owner approve it, check in through the resource's signed QR
+ * link, and check out through the same link.
  *
  * A fresh student each run keeps runs independent: no leftover bookings of
  * theirs, and their own scan rate-limit budget (5 per resource per minute).
  *
- * The PWA has no booking or approval screens yet (CLAUDE.md §11 screens 2–5
- * aren't built), so those two steps use the real API; everything else is
- * the browser.
+ * The PWA has no approvals screen yet (CLAUDE.md §11 screen 5), so approval
+ * uses the real API; everything else is the browser.
  */
 test("book, approve, check in and check out", async ({ page, baseURL }) => {
   if (!baseURL) throw new Error("baseURL is not configured");
@@ -42,10 +45,13 @@ test("book, approve, check in and check out", async ({ page, baseURL }) => {
     departmentId: owner.user.departmentId,
   });
 
-  // A slot starting 2 minutes from now, so check-in (start − 15 min) is already open.
-  const start = new Date(Math.ceil(Date.now() / MIN) * MIN + 2 * MIN);
-  const end = new Date(start.getTime() + 30 * MIN);
-  test.skip(istDate(start) !== istDate(new Date(end.getTime() - 1)), "bookings can't cross IST midnight; run again after 00:00 IST");
+  // The calendar books from the next whole minute to the end of the next
+  // half-hour row: under an hour, starting now, so check-in is open. In the
+  // last hour before IST midnight there may be no room left today, since
+  // bookings can't cross it.
+  const now = new Date();
+  test.skip(ist(now).getUTCHours() === 23, "too close to IST midnight for a same-day booking; run again after 00:00 IST");
+  const today = istDate(now);
 
   // A dedicated resource that requires approval, owned by the owner account.
   const existing = await admin.call<Resource[]>("GET", `/api/resources?q=${encodeURIComponent(E2E_RESOURCE)}`);
@@ -63,15 +69,18 @@ test("book, approve, check in and check out", async ({ page, baseURL }) => {
         minSlotMinutes: 30,
         maxSlotMinutes: 120,
         bookingHorizonDays: 7,
+        ...ALWAYS_OPEN,
         owners: [{ userId: owner.user.id, approvalLevel: 1 }],
       })
     ).data;
+  // One created by an earlier version of this test has the default hours.
+  await admin.call("PATCH", `/api/resources/${resource.id}`, ALWAYS_OPEN);
 
   // An interrupted earlier run may have left a booking holding our slot: the
   // owner clears it (cancelling, or ending a session still checked in).
   const held = await owner.call<Booking[]>(
     "GET",
-    `/api/bookings?resourceId=${resource.id}&status=pending,approved,checked_in&from=${start.toISOString()}&to=${end.toISOString()}`,
+    `/api/bookings?resourceId=${resource.id}&status=pending,approved,checked_in&from=${now.toISOString()}&to=${new Date(now.getTime() + 90 * MIN).toISOString()}`,
   );
   for (const b of held.data) {
     if (b.status === "checked_in") await owner.call("POST", "/api/checkin/manual", { bookingId: b.id });
@@ -83,19 +92,35 @@ test("book, approve, check in and check out", async ({ page, baseURL }) => {
   await page.getByLabel("Email").fill(studentLogin.email);
   await page.locator("#sign-in-password").fill(studentLogin.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page).toHaveURL(/\/scan$/);
+  await expect(page).toHaveURL(/\/resources$/);
 
-  // 2. Book (API: no booking screen yet). It needs approval.
-  const booked = await student.call<Booking>(
-    "POST",
-    "/api/bookings",
-    { resourceId: resource.id, start: start.toISOString(), end: end.toISOString(), purpose: "End-to-end test" },
-    { "Idempotency-Key": `e2e-${randomUUID()}` },
-  );
-  expect(booked.data.status).toBe("pending");
+  // 2. Book through the week calendar: open the resource from the directory,
+  // then drag from the first free half-hour today (the one under way) down to
+  // the next. It needs approval.
+  await page.getByRole("link", { name: E2E_RESOURCE, exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/resources/${resource.id}$`));
+  const free = page.locator(`[role=gridcell][data-day="${today}"][aria-disabled="false"]`);
+  await expect(free.first()).toBeVisible();
+  await free.first().hover();
+  await page.mouse.down();
+  await free.nth(1).hover();
+  await page.mouse.up();
+
+  const panel = page.getByRole("form", { name: "New booking" });
+  await expect(panel).toBeVisible();
+  await panel.getByLabel("Purpose").fill("End-to-end test");
+  await panel.getByRole("button", { name: "Book", exact: true }).click();
+  await expect(panel.getByText("Booked; waiting for approval.")).toBeVisible();
+  // The result is announced to screen readers too.
+  await expect(page.getByRole("status").filter({ hasText: /^Booked / })).toHaveText(/Waiting for approval\.$/);
+
+  const mine = await student.call<Booking[]>("GET", `/api/bookings?mine=true&resourceId=${resource.id}&status=pending`);
+  expect(mine.data).toHaveLength(1);
+  const booking = mine.data[0] as Booking;
+  expect(new Date(booking.start).getTime() - Date.now()).toBeLessThan(2 * MIN);
 
   // 3. The owner approves it (API: no approvals screen yet).
-  const approved = await owner.call<Booking>("POST", `/api/bookings/${booked.data.id}/approve`, { comment: "e2e" });
+  const approved = await owner.call<Booking>("POST", `/api/bookings/${booking.id}/approve`, { comment: "e2e" });
   expect(approved.data.status).toBe("approved");
 
   // 4. Check in through the signed link the printed QR code opens.
@@ -104,13 +129,13 @@ test("book, approve, check in and check out", async ({ page, baseURL }) => {
   await page.goto(link);
   await page.getByRole("button", { name: "Check in or out" }).click();
   await expect(page.getByText("Checked in", { exact: true })).toBeVisible();
-  expect((await student.call<Booking>("GET", `/api/bookings/${booked.data.id}`)).data.status).toBe("checked_in");
+  expect((await student.call<Booking>("GET", `/api/bookings/${booking.id}`)).data.status).toBe("checked_in");
 
   // 5. The same link again checks out.
   await page.goto(link);
   await page.getByRole("button", { name: "Check in or out" }).click();
   await expect(page.getByText("Checked out", { exact: true })).toBeVisible();
-  expect((await student.call<Booking>("GET", `/api/bookings/${booked.data.id}`)).data.status).toBe("completed");
+  expect((await student.call<Booking>("GET", `/api/bookings/${booking.id}`)).data.status).toBe("completed");
 
   await Promise.all([admin.dispose(), owner.dispose(), student.dispose()]);
 });
