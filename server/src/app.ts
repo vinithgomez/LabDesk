@@ -41,10 +41,10 @@ export function createApp({ config, services, logger, redis }: AppDeps): Express
   app.use(express.json({ limit: "100kb" }));
   app.use(cookieParser());
 
-  const isProd = config.nodeEnv === "production";
-  // Frontend and API are on different sites in production (Vercel vs
-  // Railway/Render), which requires SameSite=None; Secure for the cookie.
-  const cookie = { secure: isProd, sameSite: isProd ? "none" : "lax" } as const;
+  // By default: SameSite=None; Secure in production, where the frontend and
+  // API may be on different sites (Vercel vs Railway/Render); Lax otherwise.
+  // See COOKIE_SECURE / COOKIE_SAMESITE in src/config/env.ts.
+  const cookie = config.cookie;
 
   app.get("/api/health", (_req, res) => {
     res.json({ data: { status: "ok" } });

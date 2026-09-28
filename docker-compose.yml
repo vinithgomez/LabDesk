@@ -1,7 +1,12 @@
-# Postgres credentials come from server/.env (see server/.env.example):
-#   docker compose --env-file server/.env up -d
-# The :? form makes compose fail loudly if a variable is missing, rather than
-# silently initialising the database with an empty user or password.
+# The whole app, seeded: docker compose --env-file server/.env up --build
+#   -> http://localhost:8080 (sign in with SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD
+#      or any demo account with SEED_USER_PASSWORD)
+# Databases only, for local development (npm run dev):
+#   docker compose --env-file server/.env up -d postgres redis
+#
+# Every value comes from server/.env (see server/.env.example) — nothing is
+# hardcoded here. The :? form makes compose fail loudly if a variable is
+# missing, rather than silently starting with an empty user or secret.
 services:
   postgres:
     image: postgres:16-alpine
@@ -33,6 +38,54 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # The API: applies migrations and seeds on start (both idempotent), then
+  # serves. Reachable only through the web container's /api proxy.
+  api:
+    build: ./server
+    container_name: labdesk-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in server/.env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in server/.env}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+      SEED_ON_START: "true"
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:?set SEED_ADMIN_EMAIL in server/.env}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?set SEED_ADMIN_PASSWORD in server/.env}
+      SEED_USER_PASSWORD: ${SEED_USER_PASSWORD:?set SEED_USER_PASSWORD in server/.env}
+      # Printed into QR codes, and the calendar-feed base URL.
+      PUBLIC_APP_URL: http://localhost:8080
+      CORS_ORIGIN: http://localhost:8080
+      # One origin over plain http here, so the refresh cookie is Lax and not Secure.
+      COOKIE_SECURE: "false"
+      COOKIE_SAMESITE: lax
+      JOBS_ENABLED: "true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+
+  # The PWA, served by nginx, which proxies /api to the API.
+  web:
+    build: ./client
+    container_name: labdesk-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "8080:80"
 
 volumes:
   pgdata:

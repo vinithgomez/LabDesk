@@ -61,6 +61,7 @@ export function testConfig(databaseUrl: string): AppConfig {
     redisUrl: inject("redisUrl"),
     publicAppUrl: "https://labdesk.test",
     publicApiUrl: "https://api.labdesk.test",
+    cookie: { secure: false, sameSite: "lax" },
     icsTokenSecret: "test-ics-secret-0123456789",
     jobsEnabled: false,
   };

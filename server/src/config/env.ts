@@ -36,6 +36,12 @@ const envSchema = z.object({
   // Base URL of the PWA, printed into resource QR codes. Changing it
   // invalidates every printed QR, so treat it as fixed per deployment.
   PUBLIC_APP_URL: z.url().default("http://localhost:5173"),
+  // Refresh-cookie overrides. Defaults follow NODE_ENV (CLAUDE.md §2c):
+  // production -> SameSite=None; Secure (frontend and API on different
+  // sites), otherwise Lax. Override when that doesn't fit, e.g. the
+  // docker-compose demo: production mode, but plain http on one origin.
+  COOKIE_SECURE: z.enum(["true", "false"]).optional(),
+  COOKIE_SAMESITE: z.enum(["lax", "strict", "none"]).optional(),
   // Base URL calendar apps use to reach the API; defaults to PUBLIC_APP_URL
   // (the frontend proxies /api). Set it when the API lives elsewhere.
   PUBLIC_API_URL: z.url().optional(),
@@ -63,6 +69,8 @@ export interface AppConfig {
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
   redisUrl: string;
   publicAppUrl: string;
+  /** The refresh cookie's Secure and SameSite attributes. */
+  cookie: { secure: boolean; sameSite: "lax" | "strict" | "none" };
   /** Where calendar apps fetch feeds from (no trailing slash). */
   publicApiUrl: string;
   icsTokenSecret: string;
@@ -122,6 +130,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     redisUrl: e.REDIS_URL,
     publicAppUrl: e.PUBLIC_APP_URL.replace(/\/+$/, ""),
     publicApiUrl: trimSlash(e.PUBLIC_API_URL ?? e.PUBLIC_APP_URL),
+    cookie: {
+      secure: e.COOKIE_SECURE ? e.COOKIE_SECURE === "true" : e.NODE_ENV === "production",
+      sameSite: e.COOKIE_SAMESITE ?? (e.NODE_ENV === "production" ? "none" : "lax"),
+    },
     icsTokenSecret: e.ICS_TOKEN_SECRET ?? deriveIcsTokenSecret(e.JWT_ACCESS_SECRET),
     jobsEnabled: e.JOBS_ENABLED,
   };
