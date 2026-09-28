@@ -1,0 +1,160 @@
+name: CI
+
+# lint -> typecheck -> test -> build (CLAUDE.md §3), then the end-to-end flow
+# against a real stack. Every value below is a CI-only throwaway for a
+# disposable database and servers that live only for this job: none of them
+# is a secret, and no deployment uses them.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: Server — lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: labdesk
+          POSTGRES_PASSWORD: labdesk
+          POSTGRES_DB: labdesk_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U labdesk -d labdesk_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      # The integration tests use these service containers instead of
+      # starting their own (src/test/global-setup.ts). The database name must
+      # end in _test.
+      TEST_DATABASE_URL: postgresql://labdesk:labdesk@localhost:5432/labdesk_test?schema=public
+      TEST_REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  client:
+    name: Client — lint, typecheck, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+
+  e2e:
+    name: End-to-end (Playwright)
+    needs: [server, client]
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: labdesk
+          POSTGRES_PASSWORD: labdesk
+          POSTGRES_DB: labdesk
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U labdesk -d labdesk"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://labdesk:labdesk@localhost:5432/labdesk?schema=public
+      REDIS_URL: redis://localhost:6379
+      PUBLIC_APP_URL: http://localhost:5173
+      CORS_ORIGIN: http://localhost:5173
+      JOBS_ENABLED: "false"
+      BCRYPT_ROUNDS: "4"
+      JWT_ACCESS_SECRET: ci-only-access-signing-key
+      JWT_REFRESH_SECRET: ci-only-refresh-signing-key
+      SEED_ADMIN_EMAIL: admin@college.edu
+      SEED_ADMIN_PASSWORD: ci-only-admin-login
+      SEED_USER_PASSWORD: ci-only-demo-login
+      # Playwright starts the API and the PWA dev servers itself.
+      E2E_START_SERVERS: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
+            e2e/package-lock.json
+      - name: Install
+        run: |
+          npm ci --prefix server
+          npm ci --prefix client
+          npm ci --prefix e2e
+      - name: Migrate and seed
+        working-directory: server
+        run: |
+          npm run db:migrate
+          npm run db:seed
+      - name: Typecheck the tests
+        working-directory: e2e
+        run: npm run typecheck
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+      - name: Playwright
+        working-directory: e2e
+        run: npm test
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/playwright-report
+          retention-days: 7

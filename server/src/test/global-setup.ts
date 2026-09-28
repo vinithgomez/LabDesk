@@ -45,8 +45,20 @@ function testDatabaseCredentials(): { user: string; password: string; database: 
  * and applies the real migrations, so tests exercise the actual schema,
  * extensions and constraints. Never a mock or SQLite (CLAUDE.md §2.5).
  * Also a disposable Redis 7 for rate limiting and job locks.
+ *
+ * CI instead provides both as service containers: when TEST_DATABASE_URL
+ * and TEST_REDIS_URL are set, those are used (still a real PostgreSQL and
+ * Redis, migrated the same way) and nothing is started here.
  */
 export default async function setup({ provide }: GlobalSetupContext): Promise<() => Promise<void>> {
+  const external = externalServices();
+  if (external) {
+    migrate(external.databaseUrl);
+    provide("databaseUrl", external.databaseUrl);
+    provide("redisUrl", external.redisUrl);
+    return async () => undefined;
+  }
+
   const credentials = testDatabaseCredentials();
   const [container, redis]: [StartedPostgreSqlContainer, StartedRedisContainer] = await Promise.all([
     new PostgreSqlContainer("postgres:16-alpine")
@@ -58,15 +70,36 @@ export default async function setup({ provide }: GlobalSetupContext): Promise<()
   ]);
 
   const databaseUrl = `${container.getConnectionUri()}?schema=public`;
-  const prismaCli = createRequire(import.meta.url).resolve("prisma/build/index.js");
-  execFileSync(process.execPath, [prismaCli, "migrate", "deploy"], {
-    env: { ...process.env, DATABASE_URL: databaseUrl },
-    stdio: "pipe",
-  });
+  migrate(databaseUrl);
 
   provide("databaseUrl", databaseUrl);
   provide("redisUrl", redis.getConnectionUrl());
   return async () => {
     await Promise.all([container.stop(), redis.stop()]);
   };
+}
+
+function migrate(databaseUrl: string): void {
+  const prismaCli = createRequire(import.meta.url).resolve("prisma/build/index.js");
+  execFileSync(process.execPath, [prismaCli, "migrate", "deploy"], {
+    env: { ...process.env, DATABASE_URL: databaseUrl },
+    stdio: "pipe",
+  });
+}
+
+/**
+ * Externally provided test services, if any. The tests truncate every table,
+ * so an external database must be named *_test: a mistyped URL can never
+ * point them at a real database.
+ */
+function externalServices(): { databaseUrl: string; redisUrl: string } | null {
+  const databaseUrl = process.env.TEST_DATABASE_URL;
+  const redisUrl = process.env.TEST_REDIS_URL;
+  if (!databaseUrl && !redisUrl) return null;
+  if (!databaseUrl || !redisUrl) throw new Error("Set both TEST_DATABASE_URL and TEST_REDIS_URL, or neither");
+  const database = new URL(databaseUrl).pathname.replace(/^\//, "");
+  if (!database.endsWith("_test")) {
+    throw new Error(`Refusing to run tests against database "${database}": its name must end in _test`);
+  }
+  return { databaseUrl, redisUrl };
 }
