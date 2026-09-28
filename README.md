@@ -1,5 +1,7 @@
 # LabDesk
 
+[![CI](https://github.com/vinithgomez/LabDesk/actions/workflows/ci.yml/badge.svg)](https://github.com/vinithgomez/LabDesk/actions/workflows/ci.yml)
+
 Lab & equipment booking and utilization system for a college department.
 
 ## The problem
@@ -31,7 +33,7 @@ flowchart LR
     cal["Calendar apps"]
   end
   subgraph Frontend["Frontend — Vercel (or nginx in docker compose)"]
-    pwa["React PWA<br/>scan · check-in · analytics"]
+    pwa["React PWA<br/>book · scan · check-in · analytics"]
   end
   subgraph Backend["API — Railway / Render (Docker)"]
     api["Express API<br/>routes → policy → services → repositories"]
@@ -110,20 +112,27 @@ as `PUBLIC_APP_URL` doesn't change.
   `POSTGRES_*` in `server/.env`. To use existing services instead (CI does),
   set `TEST_DATABASE_URL` (the database name must end in `_test`: the tests
   truncate every table) and `TEST_REDIS_URL`.
+- **Client** — `cd client && npm test`. Vitest and Testing Library in jsdom:
+  the week calendar's grid maths (IST day boundaries, half-hour rows, drags
+  made upwards, selections crossing IST midnight), the error-code sentences,
+  and the booking panel's 409 recovery and Idempotency-Key reuse. They run in
+  a New York time zone so any leak of the machine's local time fails.
 - **End to end** — with the app running (either way above), `cd e2e && npm
   install && npx playwright install chromium && npm test`. One happy path on
-  the real stack: register, sign in, book, owner approval, check-in through the
-  resource's signed QR link, check-out. Point it elsewhere with
+  the real stack: register, sign in, book by dragging on the week calendar,
+  owner approval, check-in through the resource's signed QR link, check-out.
+  It skips itself in the last hour before IST midnight, when there may be no
+  same-day slot left to book. Point it elsewhere with
   `E2E_BASE_URL` (e.g. `http://localhost:8080` for docker compose); set
   `E2E_BROWSER_CHANNEL=chrome` to use an installed Chrome.
-- **Everything** — `npm test` at the repository root runs both (the e2e part
-  needs the app running).
+- **Everything** — `npm test` at the repository root runs all three (the e2e
+  part needs the app running).
 - **Lint and typecheck** — `npm run lint` / `npm run typecheck` in `server/`
   and `client/`.
 
 **CI** (`.github/workflows/ci.yml`) runs on every push and pull request to
 `master`: server lint → typecheck → test → build (Postgres and Redis as
-service containers), client lint → typecheck → build, then the Playwright flow
+service containers), client lint → typecheck → test → build, then the Playwright flow
 against a freshly migrated and seeded stack.
 
 ## Concurrency: what the exclusion constraint doesn't solve
@@ -352,10 +361,10 @@ so run it against a demo deployment, not a real one).
 
 - **Multi-day equipment loans.** Bookings are same-day by design (§2b);
   lending equipment for days at a time needs its own model.
-- **Frontend screens** for the resource directory, week calendar, my bookings
-  (with the calendar-feed link), approvals inbox and admin (resources,
-  maintenance, incidents). The API for all of them exists; the PWA has sign-in,
-  scanning, check-in and analytics.
+- **Frontend screens** for the approvals inbox and admin (resources,
+  maintenance, incidents). The API for both exists; the PWA has sign-in and
+  registration, the resource directory, the week calendar, my bookings (with
+  the calendar-feed link), scanning, check-in and analytics.
 - **Notifications** (email/push) — promotions, approvals and maintenance
   cancellations are visible only in the app today.
 
