@@ -8,6 +8,7 @@ export type AuditEntityType = "user" | "resource" | "booking" | "waitlist_entry"
 
 export type AuditAction =
   | "user.role_changed"
+  | "user.calendar_feed_regenerated"
   | "resource.created"
   | "resource.updated"
   | "resource.deactivated"

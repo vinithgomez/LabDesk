@@ -92,6 +92,11 @@ export interface AnalyticsSubject {
   departmentId: string | null;
 }
 
+/** Subject for `calendar:manage`: whose calendar feed. */
+export interface CalendarSubject {
+  userId: string;
+}
+
 export interface PolicySubjects {
   "resource:view": ResourceViewSubject;
   "resource:manage": ResourceManageSubject;
@@ -109,6 +114,7 @@ export interface PolicySubjects {
   "series:view": SeriesSubject;
   "series:cancel": SeriesSubject;
   "analytics:view": AnalyticsSubject;
+  "calendar:manage": CalendarSubject;
 }
 
 export type Action = keyof PolicySubjects;
@@ -221,6 +227,10 @@ const rules: { [A in Action]: Rule<A> } = {
   // else. Faculty and in-charges see their own department only; an admin may
   // ask for another department or all of them (departmentId null).
   "analytics:view": (actor, s) => ANALYTICS_ROLES.includes(actor.role) && canSeeDepartment(actor, s.departmentId),
+
+  // Your own feed only: it lists your bookings. Nobody reads or revokes
+  // another user's feed, admins included.
+  "calendar:manage": (actor, s) => s.userId === actor.id,
 };
 
 export function can<A extends Action>(actor: Actor, action: A, subject: PolicySubjects[A]): boolean {

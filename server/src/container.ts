@@ -6,6 +6,7 @@ import { createUnitOfWork, type UnitOfWork } from "./repositories/index.js";
 import { AnalyticsService } from "./services/analytics.service.js";
 import { AuthService } from "./services/auth.service.js";
 import { BookingService } from "./services/booking.service.js";
+import { CalendarService } from "./services/calendar.service.js";
 import { CheckinService } from "./services/checkin.service.js";
 import { DepartmentService } from "./services/department.service.js";
 import { ResourceService } from "./services/resource.service.js";
@@ -23,6 +24,7 @@ export interface Services {
   waitlist: WaitlistService;
   series: SeriesService;
   analytics: AnalyticsService;
+  calendar: CalendarService;
 }
 
 export interface ServiceOverrides {
@@ -56,5 +58,6 @@ export function createServices(prisma: PrismaClient, config: AppConfig, override
     waitlist: new WaitlistService(uow, bookings, clock),
     series: new SeriesService(uow, bookings, clock),
     analytics: new AnalyticsService(uow, clock),
+    calendar: new CalendarService(uow, { publicApiUrl: config.publicApiUrl, icsTokenSecret: config.icsTokenSecret }, clock),
   };
 }

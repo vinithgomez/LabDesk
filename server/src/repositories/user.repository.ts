@@ -43,6 +43,12 @@ export class UserReader {
     });
   }
 
+  /** The user's calendar-feed version (null if no such user). */
+  async findFeedVersion(id: string): Promise<number | null> {
+    const row = await this.db.user.findUnique({ where: { id }, select: { icsFeedVersion: true } });
+    return row?.icsFeedVersion ?? null;
+  }
+
   findManyByIds(ids: string[]): Promise<User[]> {
     return this.db.user.findMany({ where: { id: { in: ids } }, select: userSelect });
   }
@@ -79,6 +85,16 @@ export class UserWriter extends UserReader {
    */
   async lockById(id: string): Promise<void> {
     await this.tx.$executeRaw`SELECT 1 FROM "users" WHERE "id" = ${id}::uuid FOR UPDATE`;
+  }
+
+  /** Revokes every earlier calendar-feed URL; returns the new version. */
+  async bumpFeedVersion(id: string): Promise<number> {
+    const row = await this.tx.user.update({
+      where: { id },
+      data: { icsFeedVersion: { increment: 1 } },
+      select: { icsFeedVersion: true },
+    });
+    return row.icsFeedVersion;
   }
 
   updateRole(id: string, role: UserRole): Promise<User> {

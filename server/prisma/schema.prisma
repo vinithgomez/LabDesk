@@ -99,6 +99,8 @@ model User {
   departmentId              String              @map("department_id") @db.Uuid
   rollNo                    String?             @map("roll_no")
   isActive                  Boolean             @default(true) @map("is_active")
+  // Calendar feed version; bumping it revokes every earlier feed URL.
+  icsFeedVersion            Int                 @default(1) @map("ics_feed_version")
   createdAt                 DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   department                Department          @relation(fields: [departmentId], references: [id], onDelete: Restrict)
   ownedResources            ResourceOwner[]

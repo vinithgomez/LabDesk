@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { z } from "zod";
 
 /** Parses durations like "15m", "7d", "3600s" into whole seconds. */
@@ -35,6 +36,12 @@ const envSchema = z.object({
   // Base URL of the PWA, printed into resource QR codes. Changing it
   // invalidates every printed QR, so treat it as fixed per deployment.
   PUBLIC_APP_URL: z.url().default("http://localhost:5173"),
+  // Base URL calendar apps use to reach the API; defaults to PUBLIC_APP_URL
+  // (the frontend proxies /api). Set it when the API lives elsewhere.
+  PUBLIC_API_URL: z.url().optional(),
+  // Signs calendar-feed tokens. Optional: derived from JWT_ACCESS_SECRET when
+  // unset. Changing it (or that secret, when derived) revokes every feed URL.
+  ICS_TOKEN_SECRET: z.string().min(16).optional(),
   // Scheduled jobs (no-show sweeper, auto-complete, lapsed-pending expiry).
   JOBS_ENABLED: z
     .enum(["true", "false"])
@@ -55,8 +62,13 @@ export interface AppConfig {
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
   redisUrl: string;
   publicAppUrl: string;
+  /** Where calendar apps fetch feeds from (no trailing slash). */
+  publicApiUrl: string;
+  icsTokenSecret: string;
   jobsEnabled: boolean;
 }
+
+const trimSlash = (url: string): string => url.replace(/\/+$/, "");
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = envSchema.safeParse(env);
@@ -78,6 +90,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     logLevel: e.LOG_LEVEL,
     redisUrl: e.REDIS_URL,
     publicAppUrl: e.PUBLIC_APP_URL.replace(/\/+$/, ""),
+    publicApiUrl: trimSlash(e.PUBLIC_API_URL ?? e.PUBLIC_APP_URL),
+    icsTokenSecret:
+      e.ICS_TOKEN_SECRET ?? createHmac("sha256", e.JWT_ACCESS_SECRET).update("labdesk:ics-token-secret").digest("hex"),
     jobsEnabled: e.JOBS_ENABLED,
   };
 }

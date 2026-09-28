@@ -60,6 +60,8 @@ export function testConfig(databaseUrl: string): AppConfig {
     logLevel: "silent",
     redisUrl: inject("redisUrl"),
     publicAppUrl: "https://labdesk.test",
+    publicApiUrl: "https://api.labdesk.test",
+    icsTokenSecret: "test-ics-secret-0123456789",
     jobsEnabled: false,
   };
 }

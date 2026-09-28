@@ -12,6 +12,7 @@ import { analyticsRouter } from "./routes/analytics.routes.js";
 import { authRouter } from "./routes/auth.routes.js";
 import { departmentsRouter } from "./routes/departments.routes.js";
 import { bookingsRouter } from "./routes/bookings.routes.js";
+import { calendarRouter } from "./routes/calendar.routes.js";
 import { checkinRouter } from "./routes/checkin.routes.js";
 import { resourcesRouter } from "./routes/resources.routes.js";
 import { seriesRouter } from "./routes/series.routes.js";
@@ -64,6 +65,7 @@ export function createApp({ config, services, logger, redis }: AppDeps): Express
   app.use("/api/waitlist", waitlistRouter(services.auth, services.waitlist, services.resources));
   app.use("/api/series", seriesRouter(services.auth, services.series, services.resources));
   app.use("/api/analytics", analyticsRouter(services.auth, services.analytics, services.resources));
+  app.use("/api/calendar", calendarRouter(services.auth, services.calendar));
 
   app.use(notFoundHandler);
   app.use(errorHandler(logger));
