@@ -86,6 +86,8 @@ export const bookingDto = z.object({
   purpose: z.string(),
   attendeeCount: z.number(),
   seriesId: z.string().nullable(),
+  /** Set when a maintenance window cancelled this booking; see `cancellation` on its detail. */
+  cancelledByMaintenanceId: z.string().nullable(),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
 });
@@ -99,10 +101,21 @@ export const approvalDto = z.object({
   decidedAt: isoDateTime,
 });
 
+/**
+ * Why the system cancelled a booking (currently only a maintenance window
+ * created over it, §2c). Times are UTC; the UI renders them locally.
+ */
+export const cancellationDto = z.object({
+  kind: z.literal("maintenance"),
+  message: z.string(),
+  maintenance: z.object({ id: z.string(), start: isoDateTime, end: isoDateTime, reason: z.string() }),
+});
+
 /** A booking with its approval trail and the level awaiting a decision (null if none). */
 export const bookingWithApprovalsDto = bookingDto.extend({
   approvals: z.array(approvalDto),
   awaitingLevel: z.number().nullable(),
+  cancellation: cancellationDto.nullable(),
 });
 
 /**
@@ -156,6 +169,7 @@ const withApprovals = (state: ApprovalState) => ({
   ...toBookingDto(state.booking),
   approvals: state.approvals,
   awaitingLevel: state.progress.nextLevel,
+  cancellation: state.cancellation,
 });
 
 // ---- Router ---------------------------------------------------------------

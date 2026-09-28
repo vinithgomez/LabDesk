@@ -26,6 +26,7 @@ const bookingRow = z.object({
   purpose: z.string(),
   attendeeCount: z.number().int(),
   seriesId: z.string().nullable(),
+  cancelledByMaintenanceId: z.string().nullable(),
   createdAt: z.date(),
   updatedAt: z.date(),
 });
@@ -42,6 +43,7 @@ const BOOKING_COLUMNS = Prisma.sql`
   b.purpose               AS "purpose",
   b.attendee_count        AS "attendeeCount",
   b.series_id::text       AS "seriesId",
+  b.cancelled_by_maintenance_id::text AS "cancelledByMaintenanceId",
   b.created_at            AS "createdAt",
   b.updated_at            AS "updatedAt"`;
 
@@ -262,6 +264,18 @@ export class BookingReader {
     ).map((r) => r.id);
   }
 
+  /** Ids of slot-holding bookings on a resource overlapping [from, to), earliest first. */
+  async listHeldOverlapping(resourceId: string, from: Date, to: Date): Promise<string[]> {
+    return idRows.parse(
+      await this.db.$queryRaw`
+        SELECT b.id::text AS id FROM bookings b
+        WHERE b.resource_id = ${resourceId}::uuid
+          AND b.status::text IN (${Prisma.join([...SLOT_HOLDING_STATUSES])})
+          AND b.period && ${range(from, to)}
+        ORDER BY lower(b.period)`,
+    ).map((r) => r.id);
+  }
+
   /** Slot-holding bookings (pending/approved/checked_in) overlapping [from, to). */
   async heldSlots(resourceId: string, from: Date, to: Date): Promise<HeldSlot[]> {
     return z
@@ -334,13 +348,19 @@ export class BookingWriter extends BookingReader {
     await this.tx.$executeRaw`SELECT 1 FROM bookings WHERE id = ${id}::uuid FOR UPDATE`;
   }
 
-  /** The only status write in the codebase; called solely by transitionBooking. */
-  updateStatus(id: string, status: BookingStatus): Promise<Booking> {
+  /**
+   * The only status write in the codebase; called solely by transitionBooking.
+   * `cancelledByMaintenanceId` records the window behind a maintenance cancellation.
+   */
+  updateStatus(id: string, status: BookingStatus, cancelledByMaintenanceId: string | null = null): Promise<Booking> {
     return translatingConstraints(async () =>
       single(
         await this.tx.$queryRaw`
           WITH updated AS (
-            UPDATE bookings SET status = ${status}::booking_status, updated_at = now()
+            UPDATE bookings
+            SET status = ${status}::booking_status,
+                cancelled_by_maintenance_id = COALESCE(${cancelledByMaintenanceId}::uuid, cancelled_by_maintenance_id),
+                updated_at = now()
             WHERE id = ${id}::uuid
             RETURNING *
           )

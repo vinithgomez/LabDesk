@@ -110,7 +110,8 @@ model User {
   approvalsGiven            BookingApproval[]
   checkinsOverridden        Checkin[]           @relation("CheckinOverriddenBy")
   checkoutsOverridden       Checkin[]           @relation("CheckoutOverriddenBy")
-  maintenanceWindowsCreated MaintenanceWindow[]
+  maintenanceWindowsCreated MaintenanceWindow[] @relation("MaintenanceCreatedBy")
+  maintenanceWindowsRemoved MaintenanceWindow[] @relation("MaintenanceRemovedBy")
   bookingSeries             BookingSeries[]
   waitlistEntries           WaitlistEntry[]
 
@@ -209,44 +210,53 @@ model AuditLog {
 // the column is Unsupported and every booking query is raw SQL in
 // BookingRepository. Range CHECKs live in the migration.
 model Booking {
-  id             String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  resourceId     String                   @map("resource_id") @db.Uuid
-  userId         String                   @map("user_id") @db.Uuid
-  period         Unsupported("tstzrange")
-  status         BookingStatus            @default(pending)
-  purpose        String                   @default("")
-  attendeeCount  Int                      @default(1) @map("attendee_count")
+  id                       String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  resourceId               String                   @map("resource_id") @db.Uuid
+  userId                   String                   @map("user_id") @db.Uuid
+  period                   Unsupported("tstzrange")
+  status                   BookingStatus            @default(pending)
+  purpose                  String                   @default("")
+  attendeeCount            Int                      @default(1) @map("attendee_count")
   // Set on bookings materialized from a recurring series.
-  seriesId       String?                  @map("series_id") @db.Uuid
-  idempotencyKey String?                  @map("idempotency_key")
-  createdAt      DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime                 @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  resource       Resource                 @relation(fields: [resourceId], references: [id], onDelete: Restrict)
-  user           User                     @relation(fields: [userId], references: [id], onDelete: Restrict)
-  series         BookingSeries?           @relation(fields: [seriesId], references: [id], onDelete: Restrict)
-  approvals      BookingApproval[]
-  checkin        Checkin?
-  waitlistEntry  WaitlistEntry?
+  seriesId                 String?                  @map("series_id") @db.Uuid
+  // Set when a maintenance window created over the booking cancelled it.
+  cancelledByMaintenanceId String?                  @map("cancelled_by_maintenance_id") @db.Uuid
+  idempotencyKey           String?                  @map("idempotency_key")
+  createdAt                DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime                 @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  resource                 Resource                 @relation(fields: [resourceId], references: [id], onDelete: Restrict)
+  user                     User                     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  series                   BookingSeries?           @relation(fields: [seriesId], references: [id], onDelete: Restrict)
+  cancelledByMaintenance   MaintenanceWindow?       @relation(fields: [cancelledByMaintenanceId], references: [id], onDelete: Restrict)
+  approvals                BookingApproval[]
+  checkin                  Checkin?
+  waitlistEntry            WaitlistEntry?
 
   @@index([resourceId])
   @@index([userId])
   @@index([seriesId])
+  @@index([cancelledByMaintenanceId])
   @@map("bookings")
 }
 
-// Blocks bookings for a resource during [start, end). Windows for one
+// Blocks bookings for a resource during [start, end). Live windows for one
 // resource may not overlap each other (exclusion constraint in the
 // migration). The booking service rejects bookings that overlap a window
-// with MAINTENANCE_BLOCKED. Endpoints for managing windows are Phase 7.
+// with MAINTENANCE_BLOCKED; creating a window cancels the bookings it
+// overlaps (§2c). Removal is a soft delete (removed_at / removed_by).
 model MaintenanceWindow {
-  id         String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  resourceId String                   @map("resource_id") @db.Uuid
-  period     Unsupported("tstzrange")
-  reason     String                   @default("")
-  createdBy  String                   @map("created_by") @db.Uuid
-  createdAt  DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
-  resource   Resource                 @relation(fields: [resourceId], references: [id], onDelete: Restrict)
-  creator    User                     @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  id                String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  resourceId        String                   @map("resource_id") @db.Uuid
+  period            Unsupported("tstzrange")
+  reason            String                   @default("")
+  createdBy         String                   @map("created_by") @db.Uuid
+  createdAt         DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  removedAt         DateTime?                @map("removed_at") @db.Timestamptz(6)
+  removedBy         String?                  @map("removed_by") @db.Uuid
+  resource          Resource                 @relation(fields: [resourceId], references: [id], onDelete: Restrict)
+  creator           User                     @relation("MaintenanceCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  remover           User?                    @relation("MaintenanceRemovedBy", fields: [removedBy], references: [id], onDelete: Restrict)
+  cancelledBookings Booking[]
 
   @@index([createdBy])
   @@map("maintenance_windows")

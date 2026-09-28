@@ -37,7 +37,9 @@ export type DomainErrorCode =
   | "WAITLIST_DUPLICATE"
   | "INVALID_RRULE"
   /** Business hours must open before they close (no wrap past midnight). */
-  | "INVALID_BUSINESS_HOURS";
+  | "INVALID_BUSINESS_HOURS"
+  /** A resource's live maintenance windows may not overlap each other. */
+  | "MAINTENANCE_OVERLAP";
 
 export class DomainError extends Error {
   constructor(
@@ -67,6 +69,10 @@ export function bookingNotFound(): DomainError {
 /** Waitlist entries are private to their owner; anyone else's looks missing. */
 export function waitlistEntryNotFound(): DomainError {
   return new DomainError("NOT_FOUND", "Waitlist entry not found");
+}
+
+export function maintenanceNotFound(): DomainError {
+  return new DomainError("NOT_FOUND", "Maintenance window not found");
 }
 
 export function seriesNotFound(): DomainError {

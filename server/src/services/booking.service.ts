@@ -22,6 +22,7 @@ import type {
   BookingStatus,
   Checkin,
   CheckinMethod,
+  MaintenanceWindow,
   Resource,
   User,
 } from "../domain/types.js";
@@ -70,10 +71,22 @@ export interface BookingView {
   resource: Resource;
 }
 
+/**
+ * Why a booking was cancelled, when the system did it. Readable on the
+ * booking's own detail: with no notification channel yet, that is where the
+ * booker finds out (§2c).
+ */
+export interface Cancellation {
+  kind: "maintenance";
+  message: string;
+  maintenance: { id: string; start: Date; end: Date; reason: string };
+}
+
 /** Everything an approval decision is authorized and validated against. */
 export interface ApprovalState extends BookingView {
   approvals: BookingApproval[];
   progress: ApprovalProgress;
+  cancellation: Cancellation | null;
 }
 
 /**
@@ -107,10 +120,12 @@ export interface Availability {
 /**
  * The booking state machine (CLAUDE.md §5). User actions: cancel, approve,
  * reject, checkin, checkout. System actions (actor null, run by jobs):
- * no_show, auto_complete, expire.
+ * no_show, auto_complete, expire. maintenance_cancel is a side effect of
+ * someone creating a maintenance window (§2c).
  */
 export type BookingAction =
   | "cancel"
+  | "maintenance_cancel"
   | "approve"
   | "reject"
   | "checkin"
@@ -122,6 +137,11 @@ export type DecisionAction = "approve" | "reject";
 export type AttendanceAction = "checkin" | "checkout";
 export type SystemAction = "no_show" | "auto_complete" | "expire";
 
+/** The window whose creation is cancelling the booking. */
+export interface MaintenanceCancelInput {
+  window: MaintenanceWindow;
+}
+
 export interface AttendanceInput {
   /** 'manual_override' records the acting staff member as overridden_by. */
   method: CheckinMethod;
@@ -130,6 +150,9 @@ export interface AttendanceInput {
 const TRANSITIONS: Record<BookingAction, { from: readonly BookingStatus[]; to: BookingStatus }> = {
   // Cancel is forbidden once checked_in or completed (§5); terminal states stay terminal.
   cancel: { from: ["pending", "approved"], to: "cancelled" },
+  // §2c: a maintenance window cancels every booking holding a slot it
+  // overlaps — including one in progress, since the resource is unusable.
+  maintenance_cancel: { from: ["pending", "approved", "checked_in"], to: "cancelled" },
   // An approve on a multi-level booking records its level and only moves
   // the status once the final level approves.
   approve: { from: ["pending"], to: "approved" },
@@ -275,7 +298,23 @@ export class BookingService {
   async getApprovalState(id: string): Promise<ApprovalState> {
     const view = await this.get(id);
     const approvals = await this.uow.read.approvals.listForBooking(id);
-    return { ...view, approvals, progress: approvalProgress(view.resource, approvals) };
+    return {
+      ...view,
+      approvals,
+      progress: approvalProgress(view.resource, approvals),
+      cancellation: await this.cancellationOf(view),
+    };
+  }
+
+  private async cancellationOf({ booking, resource }: BookingView): Promise<Cancellation | null> {
+    if (!booking.cancelledByMaintenanceId) return null;
+    const window = await this.uow.read.maintenance.findById(booking.cancelledByMaintenanceId);
+    if (!window) return null;
+    return {
+      kind: "maintenance",
+      message: `Cancelled automatically: ${resource.name} was scheduled for maintenance during this booking.`,
+      maintenance: { id: window.id, start: window.startsAt, end: window.endsAt, reason: window.reason },
+    };
   }
 
   /** `scope` must come from the policy module (`approvalInboxScope`). */
@@ -305,6 +344,7 @@ export class BookingService {
           resource,
           approvals: own,
           progress,
+          cancellation: null,
           awaitingSince,
           stalled: isStalled(progress, awaitingSince, now),
           lapsed: booking.startsAt.getTime() <= now.getTime(),
@@ -362,12 +402,21 @@ export class BookingService {
     return this.transitionWithin(tx, bookingId, "cancel", actor);
   }
 
+  /**
+   * Cancels a booking because `window` was created over it, inside the
+   * maintenance window's own transaction. The caller must have passed
+   * `can(actor, "maintenance:create", ...)` for the resource.
+   */
+  cancelForMaintenanceWithin(tx: TxRepositories, bookingId: string, actor: Actor, window: MaintenanceWindow): Promise<Booking> {
+    return this.transitionWithin(tx, bookingId, "maintenance_cancel", actor, { window });
+  }
+
   private async transitionWithin(
     tx: TxRepositories,
     bookingId: string,
     action: BookingAction,
     actor: Actor | null,
-    input?: DecisionInput | AttendanceInput,
+    input?: DecisionInput | AttendanceInput | MaintenanceCancelInput,
   ): Promise<Booking> {
     const rule = TRANSITIONS[action];
     await tx.bookings.lockById(bookingId);
@@ -381,6 +430,8 @@ export class BookingService {
     switch (action) {
       case "cancel":
         return this.applyCancel(step, requireActor(actor, action));
+      case "maintenance_cancel":
+        return this.applyMaintenanceCancel(step, requireActor(actor, action), requireWindow(input, action));
       case "approve":
       case "reject":
         return this.applyDecision(step, action, requireActor(actor, action), requireDecision(input, action));
@@ -406,6 +457,38 @@ export class BookingService {
       after,
     });
     // The freed slot is picked up by the waitlist promoter job (§8).
+    return after;
+  }
+
+  /**
+   * A maintenance cancellation: the booking points at the window (so its own
+   * detail says why) and is audited as booking.cancelled_by_maintenance, not
+   * as the booker's own cancel. A session in progress is closed at the
+   * earlier of now and the window's start, recorded as a manual override by
+   * whoever created the window.
+   */
+  private async applyMaintenanceCancel(step: TransitionStep, actor: Actor, { window }: MaintenanceCancelInput): Promise<Booking> {
+    const { tx, before, to, now } = step;
+    const existing = await tx.checkins.findByBookingId(before.id);
+    let checkin: Checkin | null = existing;
+    if (before.status === "checked_in" && existing && existing.checkedOutAt === null) {
+      const endsAt = Math.max(existing.checkedInAt.getTime(), Math.min(now.getTime(), window.startsAt.getTime()));
+      checkin = await tx.checkins.checkOut({
+        bookingId: before.id,
+        at: new Date(endsAt),
+        method: "manual_override",
+        overriddenBy: actor.id,
+      });
+    }
+    const after = await tx.bookings.updateStatus(before.id, to, window.id);
+    await tx.writeAudit({
+      actorId: actor.id,
+      entityType: "booking",
+      entityId: before.id,
+      action: "booking.cancelled_by_maintenance",
+      before: { ...before, checkin: existing },
+      after: { ...after, checkin, maintenance: { id: window.id, reason: window.reason, start: window.startsAt, end: window.endsAt } },
+    });
     return after;
   }
 
@@ -685,12 +768,26 @@ function requireActor(actor: Actor | null, action: BookingAction): Actor {
   return actor;
 }
 
-function requireDecision(input: DecisionInput | AttendanceInput | undefined, action: BookingAction): DecisionInput {
+function requireWindow(
+  input: DecisionInput | AttendanceInput | MaintenanceCancelInput | undefined,
+  action: BookingAction,
+): MaintenanceCancelInput {
+  if (!input || !("window" in input)) throw new Error(`${action} requires a maintenance window`);
+  return input;
+}
+
+function requireDecision(
+  input: DecisionInput | AttendanceInput | MaintenanceCancelInput | undefined,
+  action: BookingAction,
+): DecisionInput {
   if (!input || !("level" in input)) throw new Error(`${action} requires a decision`);
   return input;
 }
 
-function requireAttendance(input: DecisionInput | AttendanceInput | undefined, action: BookingAction): AttendanceInput {
+function requireAttendance(
+  input: DecisionInput | AttendanceInput | MaintenanceCancelInput | undefined,
+  action: BookingAction,
+): AttendanceInput {
   if (!input || !("method" in input)) throw new Error(`${action} requires an attendance method`);
   return input;
 }

@@ -113,8 +113,24 @@ export interface Booking {
   purpose: string;
   attendeeCount: number;
   seriesId: string | null;
+  /** Set when a maintenance window created over this booking cancelled it (§2c). */
+  cancelledByMaintenanceId: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** A period a resource is out of use (CLAUDE.md §4 maintenance_windows). */
+export interface MaintenanceWindow {
+  id: string;
+  resourceId: string;
+  startsAt: Date;
+  endsAt: Date;
+  reason: string;
+  createdBy: string;
+  createdAt: Date;
+  /** Soft delete: a removed window no longer blocks anything. */
+  removedAt: Date | null;
+  removedBy: string | null;
 }
 
 export const APPROVAL_DECISIONS = ["approved", "rejected"] as const;

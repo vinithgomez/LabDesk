@@ -7,7 +7,7 @@ import { AuditRepository } from "./audit.repository.js";
 import { BookingReader, BookingWriter } from "./booking.repository.js";
 import { CheckinReader, CheckinWriter } from "./checkin.repository.js";
 import { DepartmentRepository } from "./department.repository.js";
-import { MaintenanceRepository } from "./maintenance.repository.js";
+import { MaintenanceReader, MaintenanceWriter } from "./maintenance.repository.js";
 import { RefreshTokenRepository } from "./refresh-token.repository.js";
 import { ResourceReader, ResourceWriter } from "./resource.repository.js";
 import { SeriesReader, SeriesWriter } from "./series.repository.js";
@@ -26,7 +26,7 @@ export interface Repositories {
   checkins: CheckinReader;
   waitlist: WaitlistReader;
   series: SeriesReader;
-  maintenance: MaintenanceRepository;
+  maintenance: MaintenanceReader;
   /** Read-only aggregate queries (§10). */
   analytics: AnalyticsRepository;
 }
@@ -48,6 +48,7 @@ export interface TxRepositories extends Repositories {
   checkins: CheckinWriter;
   waitlist: WaitlistWriter;
   series: SeriesWriter;
+  maintenance: MaintenanceWriter;
   writeAudit(entry: AuditEntry): Promise<void>;
 }
 
@@ -62,7 +63,7 @@ export function createRepositories(db: DbClient): Repositories {
     checkins: new CheckinReader(db),
     waitlist: new WaitlistReader(db),
     series: new SeriesReader(db),
-    maintenance: new MaintenanceRepository(db),
+    maintenance: new MaintenanceReader(db),
     analytics: new AnalyticsRepository(db),
   };
 }
@@ -78,6 +79,7 @@ export function createTxRepositories(tx: TxClient): TxRepositories {
     checkins: new CheckinWriter(tx),
     waitlist: new WaitlistWriter(tx),
     series: new SeriesWriter(tx),
+    maintenance: new MaintenanceWriter(tx),
     writeAudit: (entry) => audit.insert(entry),
   };
 }

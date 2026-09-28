@@ -26,6 +26,7 @@ const booking = (status: BookingStatus, start = START, end = END, id = "b"): Boo
   purpose: "",
   attendeeCount: 1,
   seriesId: null,
+  cancelledByMaintenanceId: null,
   createdAt: START,
   updatedAt: START,
 });

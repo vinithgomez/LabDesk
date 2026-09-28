@@ -108,7 +108,7 @@ export class WaitlistReader {
               AND b.period && w.desired_period)
           AND NOT EXISTS (
             SELECT 1 FROM maintenance_windows m
-            WHERE m.resource_id = w.resource_id AND m.period && w.desired_period)
+            WHERE m.resource_id = w.resource_id AND m.removed_at IS NULL AND m.period && w.desired_period)
         ORDER BY w.created_at, w.id
         LIMIT ${limit}`,
     ).map((r) => r.id);

@@ -4,7 +4,13 @@
  * only available inside a unit-of-work transaction.
  */
 
-export type AuditEntityType = "user" | "resource" | "booking" | "waitlist_entry" | "booking_series";
+export type AuditEntityType =
+  | "user"
+  | "resource"
+  | "booking"
+  | "waitlist_entry"
+  | "booking_series"
+  | "maintenance_window";
 
 export type AuditAction =
   | "user.role_changed"
@@ -25,6 +31,9 @@ export type AuditAction =
   | "booking.no_show"
   | "booking.auto_completed"
   | "booking.expired"
+  | "booking.cancelled_by_maintenance"
+  | "maintenance.created"
+  | "maintenance.removed"
   | "waitlist.joined"
   | "waitlist.promoted"
   | "waitlist.expired"

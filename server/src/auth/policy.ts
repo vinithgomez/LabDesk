@@ -115,6 +115,8 @@ export interface PolicySubjects {
   "series:cancel": SeriesSubject;
   "analytics:view": AnalyticsSubject;
   "calendar:manage": CalendarSubject;
+  "maintenance:create": ResourceManageSubject;
+  "maintenance:remove": ResourceManageSubject;
 }
 
 export type Action = keyof PolicySubjects;
@@ -231,6 +233,11 @@ const rules: { [A in Action]: Rule<A> } = {
   // Your own feed only: it lists your bookings. Nobody reads or revokes
   // another user's feed, admins included.
   "calendar:manage": (actor, s) => s.userId === actor.id,
+
+  // §6: resource owner or admin — the same people who manage the resource
+  // (owners pinned to their own department, as for resource:manage).
+  "maintenance:create": (actor, s) => isAdmin(actor) || ownsResource(actor, s),
+  "maintenance:remove": (actor, s) => isAdmin(actor) || ownsResource(actor, s),
 };
 
 export function can<A extends Action>(actor: Actor, action: A, subject: PolicySubjects[A]): boolean {
@@ -302,6 +309,8 @@ function bookingCreateDenial(actor: Actor, r: BookingCreateSubject): DomainError
 const denials: { [A in Action]?: Denial<A> } = {
   "resource:view": hiddenResource,
   "resource:manage": hiddenResource,
+  "maintenance:create": hiddenResource,
+  "maintenance:remove": hiddenResource,
   "resource:manage_owners": hiddenResource,
   "booking:create": bookingCreateDenial,
   "waitlist:create": bookingCreateDenial,
