@@ -1,4 +1,5 @@
 import { ApiError } from "../../lib/api";
+import { describeApiError } from "../../lib/api-errors";
 import type { AttendanceResult, NoActiveBookingDetails } from "./types";
 
 /** Times render in the viewer's own zone; the API speaks UTC (CLAUDE.md §2.2). */
@@ -63,10 +64,10 @@ export function failureOutcome(err: unknown): Outcome {
     case "INVALID_QR":
       return { tone: "failure", title: "Not a valid code", detail: err.message };
     case "RATE_LIMITED":
-      return { tone: "failure", title: "Too many scans", detail: "Wait a minute, then try again." };
+      return { tone: "failure", title: "Too many scans", detail: describeApiError(err) };
     case "NETWORK":
-      return { tone: "failure", title: "Offline", detail: err.message };
+      return { tone: "failure", title: "Offline", detail: describeApiError(err) };
     default:
-      return { tone: "failure", title: "Couldn't check in", detail: err.message };
+      return { tone: "failure", title: "Couldn't check in", detail: describeApiError(err) };
   }
 }
