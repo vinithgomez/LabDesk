@@ -39,8 +39,9 @@ const envSchema = z.object({
   // Base URL calendar apps use to reach the API; defaults to PUBLIC_APP_URL
   // (the frontend proxies /api). Set it when the API lives elsewhere.
   PUBLIC_API_URL: z.url().optional(),
-  // Signs calendar-feed tokens. Optional: derived from JWT_ACCESS_SECRET when
-  // unset. Changing it (or that secret, when derived) revokes every feed URL.
+  // Signs calendar-feed tokens. Optional: when unset it is derived one-way
+  // from JWT_ACCESS_SECRET (see deriveIcsTokenSecret). Changing it (or that
+  // secret, when derived) revokes every feed URL.
   ICS_TOKEN_SECRET: z.string().min(16).optional(),
   // Scheduled jobs (no-show sweeper, auto-complete, lapsed-pending expiry).
   JOBS_ENABLED: z
@@ -70,6 +71,31 @@ export interface AppConfig {
 
 const trimSlash = (url: string): string => url.replace(/\/+$/, "");
 
+/** Purpose label for the derived calendar-feed key. A different purpose must use a different label. */
+export const ICS_SECRET_LABEL = "labdesk:ics-token-secret";
+
+/**
+ * The calendar-feed signing key when ICS_TOKEN_SECRET isn't set:
+ *
+ *   HMAC-SHA256(key = JWT_ACCESS_SECRET, message = ICS_SECRET_LABEL), hex-encoded
+ *
+ * - One-way: HMAC is a pseudorandom function, so the derived key reveals
+ *   nothing about the JWT secret. A leaked feed-signing key is no path to
+ *   forging access tokens.
+ * - Purpose-bound: the fixed label ties it to calendar feeds only; any other
+ *   key derived from the same secret must use a different label.
+ * - Never a JWT signature: access tokens are HS256, i.e. the same HMAC under
+ *   the same key, but over "<base64url header>.<base64url payload>". The label
+ *   contains ":", which base64url never does, so no token the server issues
+ *   can equal, or disclose, this key.
+ *
+ * Set ICS_TOKEN_SECRET explicitly in production to decouple the two entirely
+ * (rotating the JWT secret then leaves feed URLs alone).
+ */
+export function deriveIcsTokenSecret(jwtAccessSecret: string): string {
+  return createHmac("sha256", jwtAccessSecret).update(ICS_SECRET_LABEL).digest("hex");
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) {
@@ -77,6 +103,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error(`Invalid environment configuration: ${problems}`);
   }
   const e = parsed.data;
+  // An explicit ICS_TOKEN_SECRET must not literally reuse a JWT secret: one
+  // scheme's key must never be the other's.
+  if (e.ICS_TOKEN_SECRET !== undefined && [e.JWT_ACCESS_SECRET, e.JWT_REFRESH_SECRET].includes(e.ICS_TOKEN_SECRET)) {
+    throw new Error("Invalid environment configuration: ICS_TOKEN_SECRET must differ from JWT_ACCESS_SECRET and JWT_REFRESH_SECRET");
+  }
   return {
     nodeEnv: e.NODE_ENV,
     port: e.PORT,
@@ -91,8 +122,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     redisUrl: e.REDIS_URL,
     publicAppUrl: e.PUBLIC_APP_URL.replace(/\/+$/, ""),
     publicApiUrl: trimSlash(e.PUBLIC_API_URL ?? e.PUBLIC_APP_URL),
-    icsTokenSecret:
-      e.ICS_TOKEN_SECRET ?? createHmac("sha256", e.JWT_ACCESS_SECRET).update("labdesk:ics-token-secret").digest("hex"),
+    icsTokenSecret: e.ICS_TOKEN_SECRET ?? deriveIcsTokenSecret(e.JWT_ACCESS_SECRET),
     jobsEnabled: e.JOBS_ENABLED,
   };
 }
