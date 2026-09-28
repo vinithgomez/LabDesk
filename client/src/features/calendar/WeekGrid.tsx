@@ -33,6 +33,8 @@ interface WeekGridProps {
   events: WeekEvents;
   /** Per day, per row: can't be selected. */
   blocked: readonly (readonly boolean[])[];
+  /** Per day, per row: already over. */
+  past: readonly (readonly boolean[])[];
   /** Per day, per row: inside business hours and days. */
   open: readonly (readonly boolean[])[];
   /** The chosen selection, shown as a dashed block; null for none. */
@@ -52,7 +54,7 @@ const HATCH: CSSProperties = {
  * then choose the length in the panel. Keyboard: arrows move, Enter or
  * Space selects.
  */
-export function WeekGrid({ days, today, range, events, blocked, open, selection, selectionDay, onSelect }: WeekGridProps) {
+export function WeekGrid({ days, today, range, events, blocked, past, open, selection, selectionDay, onSelect }: WeekGridProps) {
   const rows = slotCount(range);
   const [drag, setDrag] = useState<{ day: number; anchor: number; reach: number; originTop: number } | null>(null);
   // The roving tab stop starts on the first free slot today (or the first cell).
@@ -188,7 +190,7 @@ export function WeekGrid({ days, today, range, events, blocked, open, selection,
                     onFocus={() => setFocus({ day: d, slot })}
                     className={`relative border-l border-slate-800 focus:outline-none focus-visible:z-40 focus-visible:outline-solid focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-indigo-300 ${
                       onHour ? "border-t border-t-slate-700/70" : "border-t border-t-slate-800/50 border-dashed"
-                    } ${open[d]?.[slot] ? "bg-slate-900" : "bg-slate-950"} ${
+                    } ${past[d]?.[slot] ? "bg-black/50" : open[d]?.[slot] ? "bg-slate-900" : "bg-slate-950"} ${
                       isBlocked ? "cursor-not-allowed" : "cursor-pointer hover:bg-indigo-500/10"
                     }`}
                     style={{ gridColumn: d + 2, gridRow: slot + 2 }}

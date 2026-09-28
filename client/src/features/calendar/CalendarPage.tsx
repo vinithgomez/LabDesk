@@ -129,6 +129,7 @@ function ResourceCalendar({ resource }: { resource: Resource }) {
             range={view.range}
             events={view.events}
             blocked={view.blocked}
+            past={view.past}
             open={view.open}
             selection={panel.outcome.kind === "booked" ? null : (chosen?.interval ?? null)}
             selectionDay={chosen?.day ?? null}
@@ -182,6 +183,9 @@ function Legend() {
       </li>
       <li className="flex items-center gap-1">
         <span className="inline-block h-3 w-4 rounded-sm bg-slate-950 ring-1 ring-slate-700" /> Closed hours
+      </li>
+      <li className="flex items-center gap-1">
+        <span className="inline-block h-3 w-4 rounded-sm bg-black ring-1 ring-slate-800" /> Past
       </li>
       <li className="flex items-center gap-1">
         <StatusBadge status="pending" /> <StatusBadge status="approved" /> <StatusBadge status="rejected" />

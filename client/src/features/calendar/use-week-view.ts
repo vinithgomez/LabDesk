@@ -5,7 +5,9 @@ import {
   defaultEnd,
   endOptions,
   gridRange,
+  nextWholeMinute,
   slotCount,
+  slotEnd,
   SLOT_MINUTES,
   weekDays,
   type DayKey,
@@ -23,6 +25,8 @@ export interface WeekView {
   events: WeekEvents;
   range: GridRange;
   blocked: boolean[][];
+  /** Per day, per row: already over. */
+  past: boolean[][];
   open: boolean[][];
   loading: boolean;
   error: unknown;
@@ -44,6 +48,10 @@ export function useWeekView(resource: Resource, weekStart: DayKey, now: Date): W
     [resource.businessHoursStart, resource.businessHoursEnd, events, days],
   );
   const blocked = useMemo(() => days.map((day) => blockedSlots(day, range, events.blocking, now)), [days, range, events, now]);
+  const past = useMemo(() => {
+    const earliest = nextWholeMinute(now);
+    return days.map((day) => Array.from({ length: slotCount(range) }, (_, slot) => slotEnd(day, range, slot) <= earliest));
+  }, [days, range, now]);
   const open = useMemo(
     () =>
       days.map((day) =>
@@ -56,6 +64,7 @@ export function useWeekView(resource: Resource, weekStart: DayKey, now: Date): W
     events,
     range,
     blocked,
+    past,
     open,
     loading: availability.isPending || mine.isPending,
     error: availability.error ?? mine.error,

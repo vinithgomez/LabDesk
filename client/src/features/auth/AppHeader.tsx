@@ -45,6 +45,9 @@ export function AppHeader() {
               <NavLink to="/resources" className={navClass}>
                 Resources
               </NavLink>
+              <NavLink to="/bookings" className={navClass}>
+                My bookings
+              </NavLink>
               <NavLink to="/scan" className={navClass}>
                 Scan
               </NavLink>
