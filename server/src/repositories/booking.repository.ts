@@ -3,6 +3,7 @@ import { constraintViolationOf, Prisma, type DbClient } from "../db/prisma.js";
 import type { TxClient } from "../db/transaction.js";
 import {
   BOOKING_STATUSES,
+  HELD_BOOKING_STATUSES,
   SLOT_HOLDING_STATUSES,
   type ApprovalInboxScope,
   type Booking,
@@ -262,6 +263,18 @@ export class BookingReader {
           AND lower(b.period) > ${now.toISOString()}::timestamptz
         ORDER BY lower(b.period)`,
     ).map((r) => r.id);
+  }
+
+  /** Whether the user has ever had a booking on the resource that held its slot. */
+  async hasHeldBooking(userId: string, resourceId: string): Promise<boolean> {
+    const rows = idRows.parse(
+      await this.db.$queryRaw`
+        SELECT b.id::text AS id FROM bookings b
+        WHERE b.user_id = ${userId}::uuid AND b.resource_id = ${resourceId}::uuid
+          AND b.status::text IN (${Prisma.join([...HELD_BOOKING_STATUSES])})
+        LIMIT 1`,
+    );
+    return rows.length > 0;
   }
 
   /** Ids of slot-holding bookings on a resource overlapping [from, to), earliest first. */

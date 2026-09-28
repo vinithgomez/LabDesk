@@ -133,6 +133,30 @@ export interface MaintenanceWindow {
   removedBy: string | null;
 }
 
+export const INCIDENT_SEVERITIES = ["minor", "major", "out_of_service"] as const;
+export type IncidentSeverity = (typeof INCIDENT_SEVERITIES)[number];
+
+/** Damage or a fault reported against a resource (CLAUDE.md §4 incidents). */
+export interface Incident {
+  id: string;
+  resourceId: string;
+  /** The booking during which it happened or was found, if any. */
+  bookingId: string | null;
+  reportedBy: string;
+  severity: IncidentSeverity;
+  description: string;
+  createdAt: Date;
+  resolvedAt: Date | null;
+  resolvedBy: string | null;
+  resolution: string;
+}
+
+/**
+ * Statuses of a booking that actually held its slot — someone who booked
+ * and could have been there. Pending, cancelled and rejected ones never did.
+ */
+export const HELD_BOOKING_STATUSES = ["approved", "checked_in", "completed", "no_show"] as const satisfies readonly BookingStatus[];
+
 export const APPROVAL_DECISIONS = ["approved", "rejected"] as const;
 export type ApprovalDecision = (typeof APPROVAL_DECISIONS)[number];
 

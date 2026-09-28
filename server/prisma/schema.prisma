@@ -72,6 +72,14 @@ enum WaitlistStatus {
   @@map("waitlist_status")
 }
 
+enum IncidentSeverity {
+  minor
+  major
+  out_of_service
+
+  @@map("incident_severity")
+}
+
 enum ResourceType {
   lab
   room
@@ -112,6 +120,8 @@ model User {
   checkoutsOverridden       Checkin[]           @relation("CheckoutOverriddenBy")
   maintenanceWindowsCreated MaintenanceWindow[] @relation("MaintenanceCreatedBy")
   maintenanceWindowsRemoved MaintenanceWindow[] @relation("MaintenanceRemovedBy")
+  incidentsReported         Incident[]          @relation("IncidentReportedBy")
+  incidentsResolved         Incident[]          @relation("IncidentResolvedBy")
   bookingSeries             BookingSeries[]
   waitlistEntries           WaitlistEntry[]
 
@@ -147,6 +157,7 @@ model Resource {
   maintenanceWindows MaintenanceWindow[]
   bookingSeries      BookingSeries[]
   waitlistEntries    WaitlistEntry[]
+  incidents          Incident[]
 
   @@index([departmentId])
   @@map("resources")
@@ -231,6 +242,7 @@ model Booking {
   approvals                BookingApproval[]
   checkin                  Checkin?
   waitlistEntry            WaitlistEntry?
+  incidents                Incident[]
 
   @@index([resourceId])
   @@index([userId])
@@ -373,4 +385,28 @@ model WaitlistEntry {
 
   @@index([userId])
   @@map("waitlist_entries")
+}
+
+// Damage or a fault reported against a resource (CLAUDE.md §4). Beyond §4:
+// created_at, resolved_by and resolution. Never deleted: resolving closes it.
+model Incident {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  resourceId  String           @map("resource_id") @db.Uuid
+  bookingId   String?          @map("booking_id") @db.Uuid
+  reportedBy  String           @map("reported_by") @db.Uuid
+  severity    IncidentSeverity
+  description String
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  resolvedAt  DateTime?        @map("resolved_at") @db.Timestamptz(6)
+  resolvedBy  String?          @map("resolved_by") @db.Uuid
+  resolution  String           @default("")
+  resource    Resource         @relation(fields: [resourceId], references: [id], onDelete: Restrict)
+  booking     Booking?         @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  reporter    User             @relation("IncidentReportedBy", fields: [reportedBy], references: [id], onDelete: Restrict)
+  resolver    User?            @relation("IncidentResolvedBy", fields: [resolvedBy], references: [id], onDelete: Restrict)
+
+  @@index([resourceId])
+  @@index([reportedBy])
+  @@index([bookingId])
+  @@map("incidents")
 }

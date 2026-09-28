@@ -10,7 +10,8 @@ export type AuditEntityType =
   | "booking"
   | "waitlist_entry"
   | "booking_series"
-  | "maintenance_window";
+  | "maintenance_window"
+  | "incident";
 
 export type AuditAction =
   | "user.role_changed"
@@ -34,6 +35,8 @@ export type AuditAction =
   | "booking.cancelled_by_maintenance"
   | "maintenance.created"
   | "maintenance.removed"
+  | "incident.reported"
+  | "incident.resolved"
   | "waitlist.joined"
   | "waitlist.promoted"
   | "waitlist.expired"

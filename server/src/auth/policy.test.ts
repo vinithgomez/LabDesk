@@ -305,3 +305,47 @@ describe("policy: analytics:view", () => {
     expect(defaultAnalyticsScope(actor("faculty", { departmentId: DEPT_B }))).toEqual({ departmentId: DEPT_B });
   });
 });
+
+describe("policy: calendar, maintenance and incidents", () => {
+  const owner = actor("lab_incharge", { id: "owner-1" });
+  const resource = { id: "r1", departmentId: DEPT_A, ownerIds: [owner.id] };
+
+  it("calendar:manage is your own feed only, admins included", () => {
+    expect(can(actor("student"), "calendar:manage", { userId: "student-1" })).toBe(true);
+    expect(can(actor("admin"), "calendar:manage", { userId: "someone" })).toBe(false);
+  });
+
+  it("maintenance follows resource:manage: owners in their department, and admins", () => {
+    for (const action of ["maintenance:create", "maintenance:remove"] as const) {
+      expect(can(owner, action, resource)).toBe(can(owner, "resource:manage", resource));
+      expect(can(owner, action, resource)).toBe(true);
+      expect(can(actor("admin", { departmentId: DEPT_B }), action, resource)).toBe(true);
+      expect(can(actor("faculty"), action, resource)).toBe(false);
+      expect(denial(actor("faculty", { departmentId: DEPT_B }), action, resource).code).toBe("NOT_FOUND");
+    }
+  });
+
+  it("incident:report needs a booking that held the slot, unless you manage the resource", () => {
+    const student = actor("student");
+    const subject = (reporterHadBooking: boolean, bookingUserId: string | null = null) => ({
+      resource,
+      reporterHadBooking,
+      bookingUserId,
+    });
+    expect(can(student, "incident:report", subject(false))).toBe(false);
+    expect(can(student, "incident:report", subject(true))).toBe(true);
+    expect(can(student, "incident:report", subject(true, "someone-else"))).toBe(false);
+    expect(can(owner, "incident:report", subject(false, "someone-else"))).toBe(true);
+    expect(can(actor("student", { departmentId: DEPT_B }), "incident:report", subject(true))).toBe(false);
+  });
+
+  it("incident view: reporter and managers; resolve: managers only", () => {
+    const s = { reportedBy: "student-1", resource };
+    expect(can(actor("student"), "incident:view", s)).toBe(true);
+    expect(can(actor("student"), "incident:resolve", s)).toBe(false);
+    expect(denial(actor("student"), "incident:resolve", s).code).toBe("FORBIDDEN");
+    expect(can(owner, "incident:resolve", s)).toBe(true);
+    expect(can(actor("faculty", { id: "f" }), "incident:view", s)).toBe(false);
+    expect(denial(actor("faculty", { id: "f" }), "incident:resolve", s).code).toBe("NOT_FOUND");
+  });
+});

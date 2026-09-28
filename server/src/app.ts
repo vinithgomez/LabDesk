@@ -11,6 +11,7 @@ import type { Redis } from "./lib/redis.js";
 import { analyticsRouter } from "./routes/analytics.routes.js";
 import { authRouter } from "./routes/auth.routes.js";
 import { departmentsRouter } from "./routes/departments.routes.js";
+import { incidentsRouter } from "./routes/incidents.routes.js";
 import { maintenanceRouter } from "./routes/maintenance.routes.js";
 import { bookingsRouter } from "./routes/bookings.routes.js";
 import { calendarRouter } from "./routes/calendar.routes.js";
@@ -68,6 +69,7 @@ export function createApp({ config, services, logger, redis }: AppDeps): Express
   app.use("/api/analytics", analyticsRouter(services.auth, services.analytics, services.resources));
   app.use("/api/calendar", calendarRouter(services.auth, services.calendar));
   app.use("/api/maintenance", maintenanceRouter(services.auth, services.maintenance, services.resources));
+  app.use("/api/incidents", incidentsRouter(services.auth, services.incidents, services.resources));
 
   app.use(notFoundHandler);
   app.use(errorHandler(logger));

@@ -75,6 +75,10 @@ export function maintenanceNotFound(): DomainError {
   return new DomainError("NOT_FOUND", "Maintenance window not found");
 }
 
+export function incidentNotFound(): DomainError {
+  return new DomainError("NOT_FOUND", "Incident not found");
+}
+
 export function seriesNotFound(): DomainError {
   return new DomainError("NOT_FOUND", "Series not found");
 }

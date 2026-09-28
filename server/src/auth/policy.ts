@@ -6,6 +6,7 @@
 import {
   bookingNotFound,
   DomainError,
+  incidentNotFound,
   resourceNotFound,
   seriesNotFound,
   waitlistEntryNotFound,
@@ -97,6 +98,30 @@ export interface CalendarSubject {
   userId: string;
 }
 
+/** The resource side of an incident subject. */
+interface IncidentResource {
+  id: string;
+  departmentId: string;
+  ownerIds: readonly string[];
+}
+
+/**
+ * Subject for `incident:report`: the resource, whether the reporter has ever
+ * had a booking on it that held its slot, and — if the report names a
+ * booking — whose booking that is.
+ */
+export interface IncidentReportSubject {
+  resource: IncidentResource;
+  reporterHadBooking: boolean;
+  bookingUserId: string | null;
+}
+
+/** Subject for `incident:view` / `incident:resolve`. */
+export interface IncidentSubject {
+  reportedBy: string;
+  resource: IncidentResource;
+}
+
 export interface PolicySubjects {
   "resource:view": ResourceViewSubject;
   "resource:manage": ResourceManageSubject;
@@ -117,6 +142,9 @@ export interface PolicySubjects {
   "calendar:manage": CalendarSubject;
   "maintenance:create": ResourceManageSubject;
   "maintenance:remove": ResourceManageSubject;
+  "incident:report": IncidentReportSubject;
+  "incident:view": IncidentSubject;
+  "incident:resolve": IncidentSubject;
 }
 
 export type Action = keyof PolicySubjects;
@@ -238,6 +266,21 @@ const rules: { [A in Action]: Rule<A> } = {
   // (owners pinned to their own department, as for resource:manage).
   "maintenance:create": (actor, s) => isAdmin(actor) || ownsResource(actor, s),
   "maintenance:remove": (actor, s) => isAdmin(actor) || ownsResource(actor, s),
+
+  // Anyone who has had a booking on the resource (in their own department),
+  // plus the people who manage it. Only managers may tie a report to
+  // someone else's booking (damage found after another person's session).
+  "incident:report": (actor, s) => {
+    const manages = isAdmin(actor) || ownsResource(actor, s.resource);
+    if (s.bookingUserId !== null && s.bookingUserId !== actor.id && !manages) return false;
+    return manages || (s.reporterHadBooking && s.resource.departmentId === actor.departmentId);
+  },
+
+  // The reporter, and whoever manages the resource.
+  "incident:view": (actor, s) => isAdmin(actor) || s.reportedBy === actor.id || ownsResource(actor, s.resource),
+
+  // Consistent with maintenance: resource owner or admin.
+  "incident:resolve": (actor, s) => isAdmin(actor) || ownsResource(actor, s.resource),
 };
 
 export function can<A extends Action>(actor: Actor, action: A, subject: PolicySubjects[A]): boolean {
@@ -311,6 +354,16 @@ const denials: { [A in Action]?: Denial<A> } = {
   "resource:manage": hiddenResource,
   "maintenance:create": hiddenResource,
   "maintenance:remove": hiddenResource,
+  "incident:report": (actor, s) => {
+    const hidden = hiddenResource(actor, s.resource);
+    if (hidden) return hidden;
+    if (s.bookingUserId !== null && s.bookingUserId !== actor.id) {
+      return new DomainError("FORBIDDEN", "Only the resource's owners or an admin can report against someone else's booking");
+    }
+    return new DomainError("FORBIDDEN", "Only people who have booked this resource, its owners and admins can report incidents on it");
+  },
+  "incident:view": () => incidentNotFound(),
+  "incident:resolve": (actor, s) => (can(actor, "incident:view", s) ? null : incidentNotFound()),
   "resource:manage_owners": hiddenResource,
   "booking:create": bookingCreateDenial,
   "waitlist:create": bookingCreateDenial,
