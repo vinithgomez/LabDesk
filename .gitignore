@@ -6,6 +6,13 @@ coverage/
 .cache/
 tmp/
 *.tsbuildinfo
+dev-dist/
+
+# Playwright output
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
 
 # Environment and secrets (.env.example is the only env file tracked)
 .env
