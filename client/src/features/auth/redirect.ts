@@ -1,4 +1,4 @@
-const DEFAULT_AFTER_LOGIN = "/scan";
+const DEFAULT_AFTER_LOGIN = "/resources";
 
 /**
  * The post-login destination from `?next=`. Only same-origin paths are

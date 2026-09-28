@@ -16,6 +16,7 @@ export default function LoginPage() {
   }
   return (
     <SignInForm
+      registerHref={`/register?next=${encodeURIComponent(next)}`}
       onSignIn={async (email, password) => {
         await signIn(email, password);
         navigate(next, { replace: true });

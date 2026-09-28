@@ -1,8 +1,15 @@
 import { useState, type FormEvent } from "react";
-import { ApiError } from "../../lib/api";
+import { Link } from "react-router-dom";
+import { describeApiError } from "../../lib/api-errors";
 
-/** Shown when there's no session; check-in needs to know who is scanning. */
-export function SignInForm({ onSignIn }: { onSignIn: (email: string, password: string) => Promise<void> }) {
+/** Shown when there's no session. `registerHref` links to account creation. */
+export function SignInForm({
+  onSignIn,
+  registerHref,
+}: {
+  onSignIn: (email: string, password: string) => Promise<void>;
+  registerHref: string;
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -16,7 +23,7 @@ export function SignInForm({ onSignIn }: { onSignIn: (email: string, password: s
     try {
       await onSignIn(email, password);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't sign in. Try again.");
+      setError(describeApiError(err));
     } finally {
       setBusy(false);
     }
@@ -27,7 +34,7 @@ export function SignInForm({ onSignIn }: { onSignIn: (email: string, password: s
 
   return (
     <form onSubmit={submit} className="flex flex-1 flex-col justify-center gap-4">
-      <h1 className="text-2xl font-bold text-white">Sign in to check in</h1>
+      <h1 className="text-2xl font-bold text-white">Sign in to LabDesk</h1>
       <label className="flex flex-col gap-2 text-slate-300">
         Email
         <input className={field} type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -69,12 +76,18 @@ export function SignInForm({ onSignIn }: { onSignIn: (email: string, password: s
       >
         {busy ? "Signing in…" : "Sign in"}
       </button>
+      <p className="text-center text-slate-400">
+        New here?{" "}
+        <Link to={registerHref} className="font-medium text-indigo-300 underline-offset-4 hover:underline focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-400">
+          Create an account
+        </Link>
+      </p>
     </form>
   );
 }
 
 /** An open eye, or the same eye with a slash through it when the password is visible. */
-function EyeIcon({ crossedOut }: { crossedOut: boolean }) {
+export function EyeIcon({ crossedOut }: { crossedOut: boolean }) {
   return (
     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
       <path strokeLinecap="round" strokeLinejoin="round" d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z" />

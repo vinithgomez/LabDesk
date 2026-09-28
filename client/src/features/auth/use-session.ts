@@ -1,5 +1,11 @@
 import { useEffect, useSyncExternalStore } from "react";
-import { refreshSession, signIn as apiSignIn, signOut as apiSignOut } from "../../lib/api";
+import {
+  refreshSession,
+  register as apiRegister,
+  signIn as apiSignIn,
+  signOut as apiSignOut,
+  type RegisterInput,
+} from "../../lib/api";
 
 export type SessionStatus = "checking" | "signedIn" | "signedOut";
 
@@ -37,6 +43,11 @@ async function signIn(email: string, password: string): Promise<void> {
   setStatus("signedIn");
 }
 
+async function register(input: RegisterInput): Promise<void> {
+  await apiRegister(input);
+  setStatus("signedIn");
+}
+
 /** Revokes the session server-side, then drops local auth state. Throws if the server can't be reached. */
 async function signOut(): Promise<void> {
   await apiSignOut();
@@ -47,5 +58,5 @@ async function signOut(): Promise<void> {
 export function useSession() {
   useEffect(ensureBootstrapped, []);
   const current = useSyncExternalStore(subscribe, () => status);
-  return { status: current, signIn, signOut };
+  return { status: current, signIn, signOut, register };
 }

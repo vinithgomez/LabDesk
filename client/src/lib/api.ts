@@ -58,6 +58,27 @@ export async function signIn(email: string, password: string): Promise<void> {
   accessToken = tokenFrom(body);
 }
 
+export interface RegisterInput {
+  email: string;
+  password: string;
+  fullName: string;
+  departmentId: string;
+  rollNo?: string;
+}
+
+/** Creates an account (always a student, CLAUDE.md §2b) and starts its session. */
+export async function register(input: RegisterInput): Promise<void> {
+  const res = await fetch("/api/auth/register", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const body: unknown = await res.json().catch(() => null);
+  if (!res.ok) throw toApiError(res.status, body);
+  accessToken = tokenFrom(body);
+}
+
 /**
  * Ends the session: the server revokes the refresh-token family and clears
  * the cookie, then the in-memory access token is dropped. Throws (leaving the
@@ -89,13 +110,17 @@ function toApiError(status: number, body: unknown): ApiError {
 }
 
 /** JSON request with the in-memory bearer token; retries once after a refresh on 401. */
-export async function apiRequest<T>(path: string, init: { method: string; body?: unknown }): Promise<T> {
+export async function apiRequest<T>(
+  path: string,
+  init: { method: string; body?: unknown; headers?: Record<string, string> },
+): Promise<T> {
   const send = () =>
     fetch(path, {
       method: init.method,
       credentials: "include",
       headers: {
         "Content-Type": "application/json",
+        ...init.headers,
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),

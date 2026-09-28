@@ -6,11 +6,11 @@ import { ANALYTICS_ROLES, useMe } from "./use-me";
 import { useSession } from "./use-session";
 
 const navClass = ({ isActive }: { isActive: boolean }) =>
-  `flex min-h-12 items-center rounded-xl px-3 text-base font-medium focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-400 ${
-    isActive ? "bg-slate-800 text-white" : "text-slate-300"
+  `flex min-h-10 items-center rounded-lg px-2.5 text-sm font-medium focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-400 ${
+    isActive ? "bg-slate-800 text-white" : "text-slate-300 hover:text-white"
   }`;
 
-/** App header: the wordmark, navigation and Sign out whenever someone is signed in. */
+/** App header: the wordmark, navigation (Analytics for staff only) and Sign out. */
 export function AppHeader() {
   const { status, signOut } = useSession();
   const me = useMe();
@@ -36,18 +36,23 @@ export function AppHeader() {
   };
 
   return (
-    <header className="mb-6 flex flex-col gap-2">
-      <div className="flex min-h-12 items-center justify-between">
-        <div className="flex items-center gap-2">
+    <header className="mb-4 flex flex-col gap-2">
+      <div className="flex min-h-10 flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1">
           <span className="mr-2 text-lg font-bold tracking-tight text-white">LabDesk</span>
-          {status === "signedIn" && canSeeAnalytics && (
-            <nav aria-label="Main" className="flex gap-1">
+          {status === "signedIn" && (
+            <nav aria-label="Main" className="flex flex-wrap gap-0.5">
+              <NavLink to="/resources" className={navClass}>
+                Resources
+              </NavLink>
               <NavLink to="/scan" className={navClass}>
                 Scan
               </NavLink>
-              <NavLink to="/analytics" className={navClass}>
-                Analytics
-              </NavLink>
+              {canSeeAnalytics && (
+                <NavLink to="/analytics" className={navClass}>
+                  Analytics
+                </NavLink>
+              )}
             </nav>
           )}
         </div>
@@ -56,7 +61,7 @@ export function AppHeader() {
             type="button"
             onClick={() => void onSignOut()}
             disabled={busy}
-            className="min-h-12 rounded-xl border border-slate-600 px-4 text-base font-medium text-slate-200 disabled:opacity-60 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-400"
+            className="min-h-10 rounded-lg border border-slate-600 px-3 text-sm font-medium text-slate-200 disabled:opacity-60 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-400"
           >
             {busy ? "Signing out…" : "Sign out"}
           </button>
