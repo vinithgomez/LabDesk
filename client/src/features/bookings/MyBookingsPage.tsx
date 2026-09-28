@@ -119,7 +119,7 @@ function BookingTable({ rows }: { rows: Booking[] }) {
   const details = useBookingDetails(rows);
   const resourceName = useResourceNames();
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-800">
+    <div className="relative overflow-x-auto rounded-lg border border-slate-800">
       <table className="w-full text-sm">
         <thead className="bg-slate-900 text-left text-xs uppercase tracking-wide text-slate-400">
           <tr>

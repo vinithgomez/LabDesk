@@ -121,8 +121,8 @@ function ResourceCalendar({ resource }: { resource: Resource }) {
         </p>
       )}
 
-      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_17rem]">
-        <div className={view.loading ? "opacity-60" : ""} aria-busy={view.loading}>
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-3 lg:grid-cols-[minmax(0,1fr)_17rem]">
+        <div className={`min-w-0 ${view.loading ? "opacity-60" : ""}`} aria-busy={view.loading}>
           <WeekGrid
             days={view.days}
             today={today}
