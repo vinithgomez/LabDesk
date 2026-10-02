@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { accounts, Api } from "./stack.js";
 
 interface Resource {
@@ -15,43 +15,48 @@ interface Booking {
 
 const E2E_RESOURCE = "E2E Lab";
 const MIN = 60_000;
+const DAY = 24 * 60 * MIN;
 const ist = (d: Date) => new Date(d.getTime() + 330 * MIN);
 const istDate = (d: Date) => ist(d).toISOString().slice(0, 10);
-/** Open all day, every day, so the calendar always has a bookable slot at "now". */
-const ALWAYS_OPEN = { businessHoursStart: "00:00", businessHoursEnd: "23:59", businessDays: [0, 1, 2, 3, 4, 5, 6] };
+/**
+ * Open all day, every day, so the calendar always has a bookable slot at
+ * "now"; and a one-minute minimum, so even the last few minutes of the day
+ * can be booked.
+ */
+const ALWAYS_OPEN = {
+  businessHoursStart: "00:00",
+  businessHoursEnd: "23:59",
+  businessDays: [0, 1, 2, 3, 4, 5, 6],
+  minSlotMinutes: 1,
+};
+
+async function signInThroughUi(page: Page, login: { email: string; password: string }) {
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(login.email);
+  await page.locator("#sign-in-password").fill(login.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page).toHaveURL(/\/resources$/);
+}
 
 /**
  * The happy path, end to end on the running stack: register, sign in through
  * the UI, book the slot starting now by dragging on the week calendar, have
- * the resource owner approve it, check in through the resource's signed QR
- * link, and check out through the same link.
+ * the resource owner approve it in the approvals inbox, check in through the
+ * resource's signed QR link, and check out through the same link. No step
+ * goes around the UI except creating the fixtures.
  *
  * A fresh student each run keeps runs independent: no leftover bookings of
  * theirs, and their own scan rate-limit budget (5 per resource per minute).
- *
- * The PWA has no approvals screen yet (CLAUDE.md §11 screen 5), so approval
- * uses the real API; everything else is the browser.
  */
-test("book, approve, check in and check out", async ({ page, baseURL }) => {
+test("book, approve, check in and check out", async ({ page, browser, baseURL }) => {
   if (!baseURL) throw new Error("baseURL is not configured");
   const who = accounts();
   const admin = await Api.signIn(baseURL, who.admin);
   const owner = await Api.signIn(baseURL, who.owner);
   const run = randomUUID().slice(0, 8);
+  const studentName = `E2E Student ${run}`;
   const studentLogin = { email: `e2e.${run}@college.edu`, password: randomBytes(12).toString("base64url") };
-  const student = await Api.register(baseURL, {
-    ...studentLogin,
-    fullName: `E2E Student ${run}`,
-    departmentId: owner.user.departmentId,
-  });
-
-  // The calendar books from the next whole minute to the end of the next
-  // half-hour row: under an hour, starting now, so check-in is open. In the
-  // last hour before IST midnight there may be no room left today, since
-  // bookings can't cross it.
-  const now = new Date();
-  test.skip(ist(now).getUTCHours() === 23, "too close to IST midnight for a same-day booking; run again after 00:00 IST");
-  const today = istDate(now);
+  const student = await Api.register(baseURL, { ...studentLogin, fullName: studentName, departmentId: owner.user.departmentId });
 
   // A dedicated resource that requires approval, owned by the owner account.
   const existing = await admin.call<Resource[]>("GET", `/api/resources?q=${encodeURIComponent(E2E_RESOURCE)}`);
@@ -66,18 +71,18 @@ test("book, approve, check in and check out", async ({ page, baseURL }) => {
         capacity: 10,
         requiresApproval: true,
         approvalLevels: 1,
-        minSlotMinutes: 30,
         maxSlotMinutes: 120,
         bookingHorizonDays: 7,
         ...ALWAYS_OPEN,
         owners: [{ userId: owner.user.id, approvalLevel: 1 }],
       })
     ).data;
-  // One created by an earlier version of this test has the default hours.
+  // One created by an earlier version of this test has other hours or a longer minimum.
   await admin.call("PATCH", `/api/resources/${resource.id}`, ALWAYS_OPEN);
 
   // An interrupted earlier run may have left a booking holding our slot: the
   // owner clears it (cancelling, or ending a session still checked in).
+  const now = new Date();
   const held = await owner.call<Booking[]>(
     "GET",
     `/api/bookings?resourceId=${resource.id}&status=pending,approved,checked_in&from=${now.toISOString()}&to=${new Date(now.getTime() + 90 * MIN).toISOString()}`,
@@ -88,22 +93,29 @@ test("book, approve, check in and check out", async ({ page, baseURL }) => {
   }
 
   // 1. Sign in through the UI as the newly registered student.
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(studentLogin.email);
-  await page.locator("#sign-in-password").fill(studentLogin.password);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page).toHaveURL(/\/resources$/);
+  await signInThroughUi(page, studentLogin);
 
   // 2. Book through the week calendar: open the resource from the directory,
   // then drag from the first free half-hour today (the one under way) down to
-  // the next. It needs approval.
+  // the next. In the last minute before IST midnight nothing is left today,
+  // so it books the first half-hour of tomorrow instead, which starts within
+  // a minute, so check-in is still open. It needs approval.
   await page.getByRole("link", { name: E2E_RESOURCE, exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/resources/${resource.id}$`));
-  const free = page.locator(`[role=gridcell][data-day="${today}"][aria-disabled="false"]`);
+  await expect(page.locator("[role=gridcell]").first()).toBeVisible();
+  const freeOn = (day: string) => page.locator(`[role=gridcell][data-day="${day}"][aria-disabled="false"]`);
+  let free = freeOn(istDate(new Date()));
+  if ((await free.count()) === 0) {
+    const tomorrow = istDate(new Date(Date.now() + DAY));
+    // Sunday's tomorrow is on next week's page.
+    if (ist(new Date()).getUTCDay() === 0) await page.getByRole("button", { name: "Next week" }).click();
+    free = freeOn(tomorrow);
+  }
   await expect(free.first()).toBeVisible();
+  const last = (await free.count()) > 1 ? free.nth(1) : free.first();
   await free.first().hover();
   await page.mouse.down();
-  await free.nth(1).hover();
+  await last.hover();
   await page.mouse.up();
 
   const panel = page.getByRole("form", { name: "New booking" });
@@ -119,9 +131,21 @@ test("book, approve, check in and check out", async ({ page, baseURL }) => {
   const booking = mine.data[0] as Booking;
   expect(new Date(booking.start).getTime() - Date.now()).toBeLessThan(2 * MIN);
 
-  // 3. The owner approves it (API: no approvals screen yet).
-  const approved = await owner.call<Booking>("POST", `/api/bookings/${booking.id}/approve`, { comment: "e2e" });
-  expect(approved.data.status).toBe("approved");
+  // 3. The owner approves it in the approvals inbox, in their own browser.
+  const ownerContext = await browser.newContext();
+  const ownerPage = await ownerContext.newPage();
+  await signInThroughUi(ownerPage, who.owner);
+  await ownerPage.getByRole("link", { name: "Approvals" }).click();
+  await expect(ownerPage).toHaveURL(/\/approvals$/);
+  const item = ownerPage.getByRole("listitem").filter({ hasText: studentName });
+  await expect(item).toHaveCount(1);
+  await expect(item.getByRole("heading", { name: E2E_RESOURCE })).toBeVisible();
+  await expect(item).toContainText("End-to-end test");
+  await item.getByRole("button", { name: "Approve" }).click();
+  await expect(ownerPage.getByRole("status")).toHaveText(new RegExp(`^Approved: ${E2E_RESOURCE}, .* for ${studentName}\\.$`));
+  await expect(item).toHaveCount(0);
+  await ownerContext.close();
+  expect((await student.call<Booking>("GET", `/api/bookings/${booking.id}`)).data.status).toBe("approved");
 
   // 4. Check in through the signed link the printed QR code opens.
   const link = await owner.checkinPath(resource.id);
