@@ -20,6 +20,7 @@ const AdminPage = lazy(() => import("./features/admin/AdminPage"));
 const AdminResourcesTab = lazy(() => import("./features/admin/ResourcesTab"));
 const AdminMaintenanceTab = lazy(() => import("./features/admin/MaintenanceTab"));
 const AdminIncidentsTab = lazy(() => import("./features/admin/IncidentsTab"));
+const AdminUsersTab = lazy(() => import("./features/admin/UsersTab"));
 
 const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
 
@@ -64,6 +65,7 @@ const router = createBrowserRouter([
           { path: "resources", element: <AdminResourcesTab /> },
           { path: "maintenance", element: <AdminMaintenanceTab /> },
           { path: "incidents", element: <AdminIncidentsTab /> },
+          { path: "users", element: <AdminUsersTab /> },
         ],
       },
       { path: "*", element: <Navigate to="/resources" replace /> },
