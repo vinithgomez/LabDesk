@@ -16,6 +16,8 @@ const CalendarPage = lazy(() => import("./features/calendar/CalendarPage"));
 const MyBookingsPage = lazy(() => import("./features/bookings/MyBookingsPage"));
 const AnalyticsPage = lazy(() => import("./features/analytics/AnalyticsPage"));
 const ApprovalsPage = lazy(() => import("./features/approvals/ApprovalsPage"));
+const AdminPage = lazy(() => import("./features/admin/AdminPage"));
+const AdminResourcesTab = lazy(() => import("./features/admin/ResourcesTab"));
 
 const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
 
@@ -52,6 +54,14 @@ const router = createBrowserRouter([
       { path: "/checkin", element: <RequireSession><CheckinLinkPage /></RequireSession> },
       { path: "/analytics", element: <RequireSession><AnalyticsPage /></RequireSession> },
       { path: "/approvals", element: <RequireSession><ApprovalsPage /></RequireSession> },
+      {
+        path: "/admin",
+        element: <RequireSession><AdminPage /></RequireSession>,
+        children: [
+          { index: true, element: <Navigate to="/admin/resources" replace /> },
+          { path: "resources", element: <AdminResourcesTab /> },
+        ],
+      },
       { path: "*", element: <Navigate to="/resources" replace /> },
     ],
   },

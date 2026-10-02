@@ -85,7 +85,7 @@ describe("formatDuration", () => {
 });
 
 describe("approval refusals", () => {
-  const base = { action: "approve" as const, ownBooking: false, decidedEarlierLevel: false, awaitingLevel: 1, lapsed: false };
+  const base = { action: "approve" as "approve" | "reject", ownBooking: false, decidedEarlierLevel: false, awaitingLevel: 1, lapsed: false };
   const say = (code: string, approval: Partial<typeof base>, status = 403) =>
     describeApiError(new ApiError(status, code, "server wording"), { approval: { ...base, ...approval } });
 

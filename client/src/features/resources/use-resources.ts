@@ -26,6 +26,7 @@ export interface Resource {
   businessDays: number[];
   isActive: boolean;
   ownerIds: string[];
+  owners: { userId: string; approvalLevel: number }[];
 }
 
 export interface Department {

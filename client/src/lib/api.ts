@@ -109,6 +109,24 @@ function toApiError(status: number, body: unknown): ApiError {
   );
 }
 
+/**
+ * A binary GET (e.g. a QR code PNG) with the bearer token, which a plain
+ * link can't carry; retries once after a refresh on 401.
+ */
+export async function apiBlob(path: string): Promise<Blob> {
+  const send = () =>
+    fetch(path, { credentials: "include", headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {} });
+  let res: Response;
+  try {
+    res = await send();
+    if (res.status === 401 && (await refreshSession())) res = await send();
+  } catch {
+    throw new ApiError(0, "NETWORK", "Couldn't reach LabDesk. Check your connection and try again.");
+  }
+  if (!res.ok) throw toApiError(res.status, await res.json().catch(() => null));
+  return res.blob();
+}
+
 /** JSON request with the in-memory bearer token; retries once after a refresh on 401. */
 export async function apiRequest<T>(
   path: string,

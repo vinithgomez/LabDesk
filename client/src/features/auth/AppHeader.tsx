@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { ApiError } from "../../lib/api";
-import { ANALYTICS_ROLES, isStaff, useMe } from "./use-me";
+import { ANALYTICS_ROLES, isAdmin, isStaff, useMe } from "./use-me";
 import { useSession } from "./use-session";
 
 const navClass = ({ isActive }: { isActive: boolean }) =>
@@ -63,6 +63,11 @@ export function AppHeader() {
               {canSeeAnalytics && (
                 <NavLink to="/analytics" className={navClass}>
                   Analytics
+                </NavLink>
+              )}
+              {isAdmin(me.data) && (
+                <NavLink to="/admin" className={navClass}>
+                  Admin
                 </NavLink>
               )}
             </nav>

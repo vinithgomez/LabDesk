@@ -31,6 +31,7 @@ const RESOURCE: Resource = {
   businessDays: [1, 2, 3, 4, 5],
   isActive: true,
   ownerIds: [],
+  owners: [],
 };
 
 const ist = (local: string) => new Date(`${local}+05:30`).toISOString();

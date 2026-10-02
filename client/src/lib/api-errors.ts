@@ -160,8 +160,12 @@ const SENTENCES: Record<ApiErrorCode, (err: ApiError, ctx: ErrorContext) => stri
       : `Too many people: ${err.message}.`,
   IDEMPOTENCY_KEY_REUSED: () => "That request clashed with an earlier one; submit it again.",
   INVALID_TRANSITION: () => "That can't be done in the booking's current state; refresh and try again.",
-  OWNER_REQUIRED: () =>
-    "A resource that needs approval must have at least one owner at each approval level it uses: add a level 1 owner, and a level 2 owner if it uses two levels.",
+  OWNER_REQUIRED: (err) => {
+    const missing = missingLevels(err);
+    return missing
+      ? `Bookings here need approval, so add an owner at level ${missing.join(" and ")}: every approval level in use needs at least one owner.`
+      : "A resource that needs approval must have at least one owner at each approval level it uses: add a level 1 owner, and a level 2 owner if it uses two levels.";
+  },
   INVALID_QR: () => "That isn't a valid LabDesk check-in code.",
   NO_ACTIVE_BOOKING: () => "You have no booking on this resource right now.",
   RATE_LIMITED: () => "Too many attempts; wait a minute, then try again.",
@@ -179,6 +183,14 @@ const SENTENCES: Record<ApiErrorCode, (err: ApiError, ctx: ErrorContext) => stri
 };
 
 const isKnown = (code: string): code is ApiErrorCode => (API_ERROR_CODES as readonly string[]).includes(code);
+
+/** The levels OWNER_REQUIRED says lack an owner (details.missingLevels). */
+function missingLevels(err: ApiError): number[] | null {
+  const d = err.details;
+  if (typeof d !== "object" || d === null || !("missingLevels" in d) || !Array.isArray(d.missingLevels)) return null;
+  const levels = d.missingLevels.filter((l): l is number => typeof l === "number");
+  return levels.length > 0 ? levels : null;
+}
 
 /** The reason the server gave for the first ineligible owner (INVALID_OWNER details). */
 function firstOwnerProblem(err: ApiError): string | null {
