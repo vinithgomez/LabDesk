@@ -9,11 +9,13 @@ const TONE_CLASS: Record<StatusTone, string> = {
 };
 
 export function StatusBadge({ status }: { status: BookingStatus | "expired" }) {
+  return <ToneBadge tone={statusTone(status)} label={STATUS_LABEL[status]} />;
+}
+
+export function ToneBadge({ tone, label }: { tone: StatusTone; label: string }) {
   return (
-    <span
-      className={`inline-flex items-center rounded px-1.5 py-px text-[11px] font-semibold leading-4 ring-1 ring-inset ${TONE_CLASS[statusTone(status)]}`}
-    >
-      {STATUS_LABEL[status]}
+    <span className={`inline-flex items-center rounded px-1.5 py-px text-[11px] font-semibold leading-4 ring-1 ring-inset ${TONE_CLASS[tone]}`}>
+      {label}
     </span>
   );
 }

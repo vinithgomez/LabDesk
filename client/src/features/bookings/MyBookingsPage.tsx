@@ -6,19 +6,21 @@ import { formatPeriod } from "../calendar/format";
 import { CalendarFeed } from "./CalendarFeed";
 import { bookingReason, canCancel, displayStatus, PAST_WINDOW_DAYS, splitByTime, type Reason } from "./reasons";
 import { StatusBadge } from "./StatusBadge";
+import { WaitlistPanel } from "./WaitlistPanel";
 import type { Booking } from "./types";
 import { useBookingDetails, useCancelBooking, usePastBookings, useResourceNames, useUpcomingBookings } from "./use-bookings";
 
-type Tab = "upcoming" | "past";
+type Tab = "upcoming" | "past" | "waitlist";
 const TABS: { id: Tab; label: string }[] = [
   { id: "upcoming", label: "Upcoming" },
   { id: "past", label: "Past" },
+  { id: "waitlist", label: "Waitlist" },
 ];
 
 const smallButton =
   "min-h-7 rounded px-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-50";
 
-/** §11 my bookings: upcoming and past, cancel, why the system ended one, and the calendar feed. */
+/** §11 my bookings: upcoming and past, cancel, why the system ended one, the waitlist, and the calendar feed. */
 export default function MyBookingsPage() {
   const [loadedAt] = useState(() => new Date());
   const now = useNow(30_000);
@@ -31,12 +33,14 @@ export default function MyBookingsPage() {
   const pastRows = past.data?.pages.flatMap((p) => p.bookings) ?? [];
   const split = splitByTime([...(upcoming.data ?? []), ...pastRows], now);
   const rows = tab === "upcoming" ? split.upcoming : split.past;
-  const query = tab === "upcoming" ? upcoming : past;
+  const query = tab === "past" ? past : upcoming;
   const truncated = past.data?.pages.some((p) => p.truncated) ?? false;
 
   const onTabKey = (e: KeyboardEvent) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    const next: Tab = tab === "upcoming" ? "past" : "upcoming";
+    const at = TABS.findIndex((t) => t.id === tab);
+    const step = e.key === "ArrowRight" ? 1 : TABS.length - 1;
+    const next = TABS[(at + step) % TABS.length]?.id ?? "upcoming";
     setTab(next);
     tabRefs.current.get(next)?.focus();
   };
@@ -70,7 +74,9 @@ export default function MyBookingsPage() {
         </div>
 
         <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`}>
-          {query.isError ? (
+          {tab === "waitlist" ? (
+            <WaitlistPanel />
+          ) : query.isError ? (
             <p role="alert" className="rounded-md bg-rose-600/20 p-2 text-sm text-rose-200">
               {describeApiError(query.error)}
             </p>
@@ -144,6 +150,15 @@ function BookingTable({ rows }: { rows: Booking[] }) {
                 </td>
                 <td className="px-3 py-1.5 text-slate-300">
                   {b.purpose || <span className="text-slate-500">—</span>}
+                  {b.seriesId && (
+                    <Link
+                      to={`/series/${b.seriesId}`}
+                      className="ml-2 rounded bg-indigo-500/15 px-1.5 text-[11px] font-semibold text-indigo-200 ring-1 ring-inset ring-indigo-400/40 hover:bg-indigo-500/25 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
+                      aria-label="Repeats weekly: open the series"
+                    >
+                      Repeats
+                    </Link>
+                  )}
                   {reason && <ReasonText reason={reason} />}
                 </td>
                 <td className="px-3 py-1.5">

@@ -50,6 +50,21 @@ export interface Availability {
   busy: BusyInterval[];
 }
 
+/** GET /api/waitlist (server/src/routes/waitlist.routes.ts waitlistEntryDto). */
+export interface WaitlistEntry {
+  id: string;
+  resourceId: string;
+  userId: string;
+  desiredPeriod: { start: string; end: string };
+  purpose: string;
+  attendeeCount: number;
+  status: "waiting" | "promoted" | "expired" | "cancelled";
+  /** The booking a promoted entry became. */
+  bookingId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface NewBooking {
   resourceId: string;
   start: string;

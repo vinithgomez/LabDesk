@@ -23,6 +23,14 @@ export function statusTone(status: BookingStatus | "expired"): StatusTone {
   }
 }
 
+/** Waitlist entries use the same semantic colours: waiting amber, booked green, expired red. */
+export const WAITLIST_STATUS: Record<"waiting" | "promoted" | "expired" | "cancelled", { label: string; tone: StatusTone }> = {
+  waiting: { label: "Waiting", tone: "pending" },
+  promoted: { label: "Booked for you", tone: "approved" },
+  expired: { label: "Expired", tone: "rejected" },
+  cancelled: { label: "Left", tone: "neutral" },
+};
+
 export const STATUS_LABEL: Record<BookingStatus | "expired", string> = {
   pending: "Pending",
   approved: "Approved",

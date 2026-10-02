@@ -2,7 +2,7 @@ import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } f
 import { apiRequest } from "../../lib/api";
 import type { Resource } from "../resources/use-resources";
 import { needsDetail, pastWindow } from "./reasons";
-import type { Booking, BookingDetail } from "./types";
+import type { Booking, BookingDetail, WaitlistEntry } from "./types";
 
 const LIST_LIMIT = 200;
 
@@ -69,6 +69,23 @@ export function useCancelBooking() {
       void queryClient.invalidateQueries({ queryKey: ["bookings"] });
       void queryClient.invalidateQueries({ queryKey: ["availability"] });
     },
+  });
+}
+
+/** My waitlist entries, newest first. */
+export function useMyWaitlist() {
+  return useQuery({
+    queryKey: ["waitlist", "mine"],
+    queryFn: () => apiRequest<WaitlistEntry[]>("/api/waitlist?limit=200", { method: "GET" }),
+  });
+}
+
+/** Leave the waitlist (waiting entries only). */
+export function useLeaveWaitlist() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiRequest<WaitlistEntry>(`/api/waitlist/${id}`, { method: "DELETE" }),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: ["waitlist"] }),
   });
 }
 
