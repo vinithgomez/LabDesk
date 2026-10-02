@@ -12,14 +12,19 @@ const button =
 /** §11 approvals inbox: approve or reject in place, oldest start first. */
 export default function ApprovalsPage() {
   const me = useMe();
-  const [onlyMine, setOnlyMine] = useState(true);
-  const inbox = useInbox(onlyMine);
-  const actions = useApprovalActions(me.data?.id);
-  const now = useNow(30_000);
-
-  if (me.data && !isStaff(me.data)) {
+  // Wait for the role, so the inbox is only asked for by staff.
+  if (!me.data) return <p className="text-sm text-slate-400">Loading…</p>;
+  if (!isStaff(me.data)) {
     return <p className="text-sm text-slate-300">The approvals inbox is for faculty, lab in-charges and admins.</p>;
   }
+  return <Inbox meId={me.data.id} />;
+}
+
+function Inbox({ meId }: { meId: string }) {
+  const [onlyMine, setOnlyMine] = useState(true);
+  const inbox = useInbox(onlyMine);
+  const actions = useApprovalActions(meId);
+  const now = useNow(30_000);
 
   return (
     <div className="flex flex-col gap-3">
@@ -60,7 +65,7 @@ export default function ApprovalsPage() {
             <InboxRow
               key={item.id}
               item={item}
-              meId={me.data?.id ?? ""}
+              meId={meId}
               now={now}
               busy={actions.busyId === item.id}
               onDecide={(action, comment) => actions.act(item, action, comment)}

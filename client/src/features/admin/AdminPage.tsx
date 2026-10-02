@@ -16,7 +16,9 @@ const tabClass = ({ isActive }: { isActive: boolean }) =>
 /** §11 admin: resources, maintenance windows, incidents and users. Admins only (the server enforces it). */
 export default function AdminPage() {
   const me = useMe();
-  if (me.data && !isAdmin(me.data)) {
+  // Wait for the role, so non-admins never fire admin-only requests.
+  if (!me.data) return <p className="text-sm text-slate-400">Loading…</p>;
+  if (!isAdmin(me.data)) {
     return <p className="text-sm text-slate-300">The admin area is for admins.</p>;
   }
   return (
