@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "./api";
-import { API_ERROR_CODES, describeApiError, formatDuration } from "./api-errors";
+import { API_ERROR_CODES, describeApiError, describeSkipReason, formatDuration } from "./api-errors";
 
 const lab = { name: "Systems Lab", capacity: 40, minSlotMinutes: 60, maxSlotMinutes: 180, bookingHorizonDays: 14 };
 const err = (code: string, message = "server says so", details?: unknown) => new ApiError(409, code, message, details);
@@ -81,5 +81,86 @@ describe("formatDuration", () => {
     [180, "3 hours"],
   ])("%i -> %s", (minutes, text) => {
     expect(formatDuration(minutes)).toBe(text);
+  });
+});
+
+describe("approval refusals", () => {
+  const base = { action: "approve" as const, ownBooking: false, decidedEarlierLevel: false, awaitingLevel: 1, lapsed: false };
+  const say = (code: string, approval: Partial<typeof base>, status = 403) =>
+    describeApiError(new ApiError(status, code, "server wording"), { approval: { ...base, ...approval } });
+
+  it("says it's your own booking", () => {
+    expect(say("FORBIDDEN", { ownBooking: true })).toBe("You can't approve or reject your own booking.");
+  });
+
+  it("says which level it's awaiting", () => {
+    expect(say("FORBIDDEN", { awaitingLevel: 2 })).toBe("This booking is awaiting level 2 approval, which isn't yours to decide.");
+    expect(say("FORBIDDEN", { awaitingLevel: 1 })).toBe("This booking is awaiting level 1 approval, which isn't yours to decide.");
+  });
+
+  it("says you already decided an earlier level", () => {
+    expect(say("FORBIDDEN", { decidedEarlierLevel: true, awaitingLevel: 2 })).toBe(
+      "You already decided an earlier level of this booking; a different approver must decide level 2.",
+    );
+  });
+
+  it("says approval is closed once the start has passed, but only for approving", () => {
+    expect(say("INVALID_TRANSITION", { lapsed: true }, 409)).toBe(
+      "Approval is closed: the booking's start time has passed, so it can only be rejected.",
+    );
+    expect(say("INVALID_TRANSITION", { lapsed: true, action: "reject" }, 409)).toBe(
+      "This booking was already decided by someone else, or cancelled, before your decision arrived.",
+    );
+  });
+
+  it("says it was already decided", () => {
+    expect(say("INVALID_TRANSITION", {}, 409)).toBe(
+      "This booking was already decided by someone else, or cancelled, before your decision arrived.",
+    );
+  });
+
+  it("covers the department and visibility refusals, and falls back for anything else", () => {
+    expect(say("WRONG_DEPARTMENT", {})).toBe("You can only decide bookings in your own department.");
+    expect(say("NOT_FOUND", {}, 404)).toBe("This booking is no longer in your inbox; it may have been cancelled.");
+    expect(say("NETWORK", {}, 0)).toBe("Couldn't reach LabDesk; check your connection and try again.");
+  });
+
+  it("never repeats the server's wording", () => {
+    for (const code of ["FORBIDDEN", "INVALID_TRANSITION", "WRONG_DEPARTMENT", "NOT_FOUND"]) {
+      expect(say(code, {})).not.toContain("server wording");
+    }
+  });
+});
+
+describe("admin refusals", () => {
+  it("explains OWNER_REQUIRED and INVALID_BUSINESS_HOURS in plain words", () => {
+    expect(describeApiError(err("OWNER_REQUIRED"))).toMatch(/at least one owner at each approval level/);
+    expect(describeApiError(err("INVALID_BUSINESS_HOURS"))).toBe("The opening time must be earlier than the closing time.");
+  });
+
+  it("names why an owner isn't eligible", () => {
+    const e = err("INVALID_OWNER", "One or more owners are not eligible", [{ userId: "u1", reason: "students cannot own resources" }]);
+    expect(describeApiError(e)).toBe(
+      "One of the chosen owners can't own this resource: students cannot own resources. Owners must be active staff in the resource's department, or admins.",
+    );
+  });
+
+  it("explains a refused role change", () => {
+    expect(describeApiError(new ApiError(403, "FORBIDDEN", "x"), { roleChange: { ownAccount: true } })).toBe(
+      "You can't change your own role; another admin has to do it.",
+    );
+  });
+
+  it("says INVALID_RRULE plainly", () => {
+    expect(describeApiError(err("INVALID_RRULE"))).not.toContain("FREQ");
+  });
+});
+
+describe("describeSkipReason", () => {
+  it("has a sentence for each booking rule, and a fallback", () => {
+    for (const code of ["SLOT_CONFLICT", "MAINTENANCE_BLOCKED", "OUTSIDE_HORIZON", "SLOT_TOO_LONG", "SLOT_TOO_SHORT", "MULTI_DAY_NOT_SUPPORTED", "CAPACITY_EXCEEDED", "FORBIDDEN", "SOMETHING_NEW"]) {
+      expect(describeSkipReason(code), code).toMatch(/^[A-Z].*\.$/);
+    }
+    expect(describeSkipReason("SLOT_CONFLICT")).toBe("Someone else already had that time booked.");
   });
 });

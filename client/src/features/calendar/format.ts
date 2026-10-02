@@ -28,3 +28,6 @@ export function formatMinute(minute: number): string {
   const m = minute % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
+
+/** "Fri 2 Oct, 10:15" */
+export const formatDateTime = (instant: Date) => formatInTimeZone(instant, IST, "EEE d MMM, HH:mm");

@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { ApiError } from "../../lib/api";
-import { ANALYTICS_ROLES, useMe } from "./use-me";
+import { ANALYTICS_ROLES, isStaff, useMe } from "./use-me";
 import { useSession } from "./use-session";
 
 const navClass = ({ isActive }: { isActive: boolean }) =>
@@ -10,7 +10,11 @@ const navClass = ({ isActive }: { isActive: boolean }) =>
     isActive ? "bg-slate-800 text-white" : "text-slate-300 hover:text-white"
   }`;
 
-/** App header: the wordmark, navigation (Analytics for staff only) and Sign out. */
+/**
+ * App header: the wordmark, navigation and Sign out. Approvals and Analytics
+ * show for staff, Admin for admins; hiding a link is a convenience, the
+ * server decides what each person may do.
+ */
 export function AppHeader() {
   const { status, signOut } = useSession();
   const me = useMe();
@@ -51,6 +55,11 @@ export function AppHeader() {
               <NavLink to="/scan" className={navClass}>
                 Scan
               </NavLink>
+              {isStaff(me.data) && (
+                <NavLink to="/approvals" className={navClass}>
+                  Approvals
+                </NavLink>
+              )}
               {canSeeAnalytics && (
                 <NavLink to="/analytics" className={navClass}>
                   Analytics

@@ -15,6 +15,7 @@ const ResourcesPage = lazy(() => import("./features/resources/ResourcesPage"));
 const CalendarPage = lazy(() => import("./features/calendar/CalendarPage"));
 const MyBookingsPage = lazy(() => import("./features/bookings/MyBookingsPage"));
 const AnalyticsPage = lazy(() => import("./features/analytics/AnalyticsPage"));
+const ApprovalsPage = lazy(() => import("./features/approvals/ApprovalsPage"));
 
 const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
 
@@ -50,6 +51,7 @@ const router = createBrowserRouter([
       { path: "/scan", element: <RequireSession><ScanPage /></RequireSession> },
       { path: "/checkin", element: <RequireSession><CheckinLinkPage /></RequireSession> },
       { path: "/analytics", element: <RequireSession><AnalyticsPage /></RequireSession> },
+      { path: "/approvals", element: <RequireSession><ApprovalsPage /></RequireSession> },
       { path: "*", element: <Navigate to="/resources" replace /> },
     ],
   },
