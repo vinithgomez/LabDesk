@@ -100,6 +100,10 @@ export interface InboxItem extends ApprovalState {
   stalled: boolean;
   /** The booking's start has passed: it can only be rejected now. */
   lapsed: boolean;
+  /** Who asked, so an approver can tell requests apart. */
+  booker: { id: string; fullName: string };
+  /** Names of everyone in the approval trail, by user id. */
+  approverNames: ReadonlyMap<string, string>;
 }
 
 export interface DecisionInput {
@@ -326,6 +330,12 @@ export class BookingService {
       this.uow.read.approvals.listForBookings(ids),
     ]);
     const resourceById = new Map(resources.map((r) => [r.id, r]));
+    // Bookers and approvers, in one query. Only names leave this method.
+    const people = await this.uow.read.users.findManyByIds([
+      ...new Set([...bookings.map((b) => b.userId), ...approvals.map((a) => a.approverId)]),
+    ]);
+    const nameById = new Map(people.map((u) => [u.id, u.fullName]));
+    const nameOf = (id: string) => nameById.get(id) ?? "Unknown user";
     const now = this.now();
 
     return bookings.flatMap((booking) => {
@@ -348,6 +358,8 @@ export class BookingService {
           awaitingSince,
           stalled: isStalled(progress, awaitingSince, now),
           lapsed: booking.startsAt.getTime() <= now.getTime(),
+          booker: { id: booking.userId, fullName: nameOf(booking.userId) },
+          approverNames: new Map(own.map((a) => [a.approverId, nameOf(a.approverId)])),
         },
       ];
     });

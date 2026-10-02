@@ -122,8 +122,12 @@ export const bookingWithApprovalsDto = bookingDto.extend({
  * An approvals-inbox entry. `stalled`: partially approved and the awaited
  * level has not acted for 24h. `lapsed`: the start has passed, so the only
  * remaining decision is reject. `canDecide`: booking:approve for this actor.
+ * `booker` and `approverName` carry names only, for items the caller may
+ * already view (booking:view); nothing else about those users.
  */
 export const inboxItemDto = bookingWithApprovalsDto.extend({
+  approvals: z.array(approvalDto.extend({ approverName: z.string() })),
+  booker: z.object({ id: z.string(), fullName: z.string() }),
   resource: z.object({ id: z.string(), name: z.string() }),
   awaitingSince: isoDateTime,
   stalled: z.boolean(),
@@ -235,6 +239,8 @@ export function bookingsRouter(auth: AuthService, bookings: BookingService, reso
       inboxDto,
       shown.map(({ item, canDecide }) => ({
         ...withApprovals(item),
+        approvals: item.approvals.map((a) => ({ ...a, approverName: item.approverNames.get(a.approverId) ?? "Unknown user" })),
+        booker: item.booker,
         resource: { id: item.resource.id, name: item.resource.name },
         awaitingSince: item.awaitingSince,
         stalled: item.stalled,

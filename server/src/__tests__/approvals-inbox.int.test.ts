@@ -162,3 +162,44 @@ describe("GET /api/bookings/pending", () => {
     expect((await inbox(incharge)).map((e) => e.id)).toEqual([ids.p2]);
   });
 });
+
+describe("GET /api/bookings/pending: names", () => {
+  it("names the booker and each approver in the trail, and nothing more about them", async () => {
+    // Real-looking names, so a name can't be confused with the email it was registered with.
+    await h.prisma.user.update({ where: { id: booker.id }, data: { fullName: "Priya Nair", rollNo: "CS21-042" } });
+    await h.prisma.user.update({ where: { id: faculty1.id }, data: { fullName: "Dr. Anita Rao" } });
+
+    const res = await request(h.app).get("/api/bookings/pending").set(incharge.auth);
+    expect(res.status).toBe(200);
+    const p3 = (res.body.data as Array<Record<string, unknown>>).find((e) => e.id === ids.p3);
+    expect(p3?.booker).toEqual({ id: booker.id, fullName: "Priya Nair" });
+    expect(p3?.approvals).toEqual([
+      {
+        level: 1,
+        approverId: faculty1.id,
+        approverName: "Dr. Anita Rao",
+        decision: "approved",
+        comment: "",
+        decidedAt: expect.any(String),
+      },
+    ]);
+
+    // Only id and name: no email, roll number, role or anything else.
+    const serialized = JSON.stringify(res.body);
+    for (const leaked of ["booker@college.edu", "f1@college.edu", "CS21-042", "passwordHash", "password", "token"]) {
+      expect(serialized).not.toContain(leaked);
+    }
+  });
+
+  it("only names bookers on items the caller may already view", async () => {
+    // The foreign department's booker never appears in this department's inboxes.
+    for (const user of [admin, faculty1, incharge, otherFaculty, booker]) {
+      const res = await request(h.app).get("/api/bookings/pending").set(user.auth);
+      const bookers = (res.body.data as Array<{ booker: { id: string } }>).map((e) => e.booker.id);
+      expect(bookers).not.toContain(foreignStudent.id);
+    }
+    // Control: the foreign admin does see them.
+    const foreign = await request(h.app).get("/api/bookings/pending").set(foreignAdmin.auth);
+    expect((foreign.body.data as Array<{ booker: { id: string } }>).map((e) => e.booker.id)).toEqual([foreignStudent.id]);
+  });
+});
