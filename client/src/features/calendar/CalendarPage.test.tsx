@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -273,5 +273,20 @@ describe("repeating a booking weekly", () => {
       ),
     ).toBeInTheDocument();
     expect(within(panel).queryByText(/UNTIL/)).not.toBeInTheDocument();
+  });
+});
+
+describe("keyboard selection", () => {
+  it("opens the panel for the cell the key was pressed on, even before focus state catches up", async () => {
+    fakeApi(() => Promise.reject(new Error("no booking expected")));
+    renderCalendar();
+    const cell = await screen.findByRole("gridcell", { name: /^Thursday 1 October, 14:00 to 14:30/ });
+    // Focus and Enter in one tick, with no render in between (as assistive tech can do).
+    act(() => {
+      cell.focus();
+      cell.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    const panel = await screen.findByRole("form", { name: "New booking" });
+    expect(within(panel).getByRole("heading")).toHaveTextContent("Thu 1 Oct, 14:00–15:00");
   });
 });

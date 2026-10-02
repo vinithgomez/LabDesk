@@ -100,13 +100,22 @@ export function WeekGrid({ days, today, range, events, blocked, past, open, sele
     onSelect({ day, span: { first: slot, last: slot } }, "tap");
   };
 
+  /** The cell a key event came from: the focused cell itself, which can be ahead of the roving-focus state. */
+  const cellOf = (target: EventTarget): Cell => {
+    const el = target instanceof HTMLElement ? target.closest<HTMLElement>("[role=gridcell]") : null;
+    const day = Number(el?.dataset.dayIndex);
+    const slot = Number(el?.dataset.slot);
+    return Number.isInteger(day) && Number.isInteger(slot) ? { day, slot } : focus;
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const at = cellOf(e.target);
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      if (blocked[focus.day]?.[focus.slot] === false) onSelect({ day: focus.day, span: { first: focus.slot, last: focus.slot } }, "keyboard");
+      if (blocked[at.day]?.[at.slot] === false) onSelect({ day: at.day, span: { first: at.slot, last: at.slot } }, "keyboard");
       return;
     }
-    const next = moveCell(focus, e.key, rows);
+    const next = moveCell(at, e.key, rows);
     if (next) {
       e.preventDefault();
       focusCell(next);
@@ -185,6 +194,8 @@ export function WeekGrid({ days, today, range, events, blocked, past, open, sele
                     aria-label={`${formatDayLong(day)}, ${formatTime(cell.start)} to ${formatTime(cell.end)}, ${describeCell(cell, events, isBlocked)}`}
                     data-day={day}
                     data-time={formatTime(cell.start)}
+                    data-day-index={d}
+                    data-slot={slot}
                     onPointerDown={(e) => startDrag(e, d, slot)}
                     onPointerUp={(e) => tap(e, d, slot)}
                     onFocus={() => setFocus({ day: d, slot })}
