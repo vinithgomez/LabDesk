@@ -3,6 +3,8 @@ import { isAdmin, useMe } from "../auth/use-me";
 
 const TABS = [
   { to: "/admin/resources", label: "Resources" },
+  { to: "/admin/maintenance", label: "Maintenance" },
+  { to: "/admin/incidents", label: "Incidents" },
 ];
 
 const tabClass = ({ isActive }: { isActive: boolean }) =>
