@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Actor, UserRole } from "../domain/types.js";
-import { approvalInboxScope, bookingListScope, can, defaultAnalyticsScope, denial } from "./policy.js";
+import { approvalInboxScope, bookingListScope, can, defaultAnalyticsScope, defaultUserListScope, denial } from "./policy.js";
 
 const DEPT_A = "dept-a";
 const DEPT_B = "dept-b";
@@ -55,6 +55,30 @@ describe("policy: user:change_role", () => {
     for (const role of ["student", "faculty", "lab_incharge"] as const) {
       expect(can(actor(role), "user:change_role", { targetUserId: "someone" })).toBe(false);
     }
+  });
+});
+
+describe("policy: user:list", () => {
+  it("allows admins only: their own department, another, or all", () => {
+    const admin = actor("admin");
+    expect(can(admin, "user:list", { departmentId: DEPT_A })).toBe(true);
+    expect(can(admin, "user:list", { departmentId: DEPT_B })).toBe(true);
+    expect(can(admin, "user:list", { departmentId: null })).toBe(true);
+    expect(can(actor("admin", { isActive: false }), "user:list", { departmentId: DEPT_A })).toBe(false);
+  });
+
+  it("denies every other role, even for their own department", () => {
+    for (const role of ["student", "faculty", "lab_incharge"] as const) {
+      for (const departmentId of [DEPT_A, DEPT_B, null]) {
+        expect(can(actor(role), "user:list", { departmentId })).toBe(false);
+        expect(denial(actor(role), "user:list", { departmentId }).code).toBe("FORBIDDEN");
+      }
+    }
+  });
+
+  it("defaults to the caller's own department, admins included", () => {
+    expect(defaultUserListScope(actor("admin"))).toEqual({ departmentId: DEPT_A });
+    expect(defaultUserListScope(actor("admin", { departmentId: DEPT_B }))).toEqual({ departmentId: DEPT_B });
   });
 });
 

@@ -29,6 +29,19 @@ export interface User {
   createdAt: Date;
 }
 
+/** What a user listing shows: no roll number, timestamps, or anything credential-like. */
+export type UserSummary = Pick<User, "id" | "fullName" | "email" | "role" | "departmentId" | "isActive">;
+
+export interface UserSearch {
+  /** null = every department. */
+  departmentId: string | null;
+  /** Case-insensitive substring of the full name. */
+  q?: string;
+  role?: UserRole;
+  activeOnly: boolean;
+  limit: number;
+}
+
 export interface UserWithDepartment extends User {
   department: Department;
 }

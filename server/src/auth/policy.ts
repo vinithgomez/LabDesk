@@ -34,6 +34,11 @@ export interface RoleChangeSubject {
   targetUserId: string;
 }
 
+/** Subject for `user:list`: the department being listed (null = every department). */
+export interface UserListSubject {
+  departmentId: string | null;
+}
+
 /** Subject for `booking:create`: the resource being booked. */
 export interface BookingCreateSubject {
   id: string;
@@ -127,6 +132,7 @@ export interface PolicySubjects {
   "resource:manage": ResourceManageSubject;
   "resource:manage_owners": ResourceOwnersSubject;
   "user:change_role": RoleChangeSubject;
+  "user:list": UserListSubject;
   "booking:create": BookingCreateSubject;
   "booking:view": BookingSubject;
   "booking:cancel": BookingSubject;
@@ -192,6 +198,11 @@ const rules: { [A in Action]: Rule<A> } = {
   // Only an admin can change a role (§2b), and never their own — an admin
   // demoting themselves could leave the system with no admin.
   "user:change_role": (actor, s) => isAdmin(actor) && s.targetUserId !== actor.id,
+
+  // Admin only: the directory of people (names, emails, roles) is what role
+  // changes and resource ownership are managed from. Staff and students
+  // never list users.
+  "user:list": (actor, s) => isAdmin(actor) && canSeeDepartment(actor, s.departmentId),
 
   "booking:create": mayBook,
 
@@ -317,6 +328,15 @@ export function bookingListScope(actor: Actor, opts: { mine: boolean }): Booking
 }
 
 /**
+ * The department a user listing covers when the caller names none: their
+ * own. As with analytics, another department (or all of them) is listed only
+ * when an admin asks for it explicitly.
+ */
+export function defaultUserListScope(actor: Actor): UserListSubject {
+  return { departmentId: actor.departmentId };
+}
+
+/**
  * The approvals inbox: pending bookings on resources the actor owns; an
  * admin sees every pending booking in their own department. Whether the
  * actor may decide a given item is still `can(actor, "booking:approve", …)`.
@@ -372,6 +392,7 @@ const denials: { [A in Action]?: Denial<A> } = {
   "waitlist:cancel": () => waitlistEntryNotFound(),
   "series:view": () => seriesNotFound(),
   "series:cancel": (actor, s) => (can(actor, "series:view", s) ? null : seriesNotFound()),
+  "user:list": () => new DomainError("FORBIDDEN", "Only admins can list users"),
   "analytics:view": (actor, s) => {
     // A named resource outside the actor's departments doesn't exist for them.
     const hidden = hiddenResource(actor, s);

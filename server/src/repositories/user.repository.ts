@@ -1,6 +1,6 @@
 import { isUniqueViolation, type DbClient } from "../db/prisma.js";
 import type { TxClient } from "../db/transaction.js";
-import type { User, UserCredentials, UserRole, UserWithDepartment } from "../domain/types.js";
+import type { User, UserCredentials, UserRole, UserSearch, UserSummary, UserWithDepartment } from "../domain/types.js";
 
 const userSelect = {
   id: true,
@@ -11,6 +11,16 @@ const userSelect = {
   rollNo: true,
   isActive: true,
   createdAt: true,
+} as const;
+
+/** Only what a listing may show (UserSummary); never the password hash or feed version. */
+const summarySelect = {
+  id: true,
+  fullName: true,
+  email: true,
+  role: true,
+  departmentId: true,
+  isActive: true,
 } as const;
 
 export interface NewUser {
@@ -51,6 +61,21 @@ export class UserReader {
 
   findManyByIds(ids: string[]): Promise<User[]> {
     return this.db.user.findMany({ where: { id: { in: ids } }, select: userSelect });
+  }
+
+  /** A filtered, name-ordered page of users. The caller sets the department scope and cap. */
+  search(filter: UserSearch): Promise<UserSummary[]> {
+    return this.db.user.findMany({
+      where: {
+        ...(filter.departmentId !== null ? { departmentId: filter.departmentId } : {}),
+        ...(filter.role ? { role: filter.role } : {}),
+        ...(filter.activeOnly ? { isActive: true } : {}),
+        ...(filter.q ? { fullName: { contains: filter.q, mode: "insensitive" as const } } : {}),
+      },
+      select: summarySelect,
+      orderBy: [{ fullName: "asc" }, { id: "asc" }],
+      take: filter.limit,
+    });
   }
 }
 
