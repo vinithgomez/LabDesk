@@ -33,7 +33,7 @@ flowchart LR
     cal["Calendar apps"]
   end
   subgraph Frontend["Frontend — Vercel (or nginx in docker compose)"]
-    pwa["React PWA<br/>book · scan · check-in · analytics"]
+    pwa["React PWA<br/>book · approve · admin · scan · analytics"]
   end
   subgraph Backend["API — Railway / Render (Docker)"]
     api["Express API<br/>routes → policy → services → repositories"]
@@ -115,14 +115,17 @@ as `PUBLIC_APP_URL` doesn't change.
 - **Client** — `cd client && npm test`. Vitest and Testing Library in jsdom:
   the week calendar's grid maths (IST day boundaries, half-hour rows, drags
   made upwards, selections crossing IST midnight), the error-code sentences,
-  and the booking panel's 409 recovery and Idempotency-Key reuse. They run in
-  a New York time zone so any leak of the machine's local time fails.
+  the booking panel's 409 recovery and Idempotency-Key reuse, the weekly
+  repeat rule builder, the approvals inbox's actions and refusals, and the
+  admin forms' validation. They run in a New York time zone so any leak of
+  the machine's local time fails.
 - **End to end** — with the app running (either way above), `cd e2e && npm
   install && npx playwright install chromium && npm test`. One happy path on
   the real stack: register, sign in, book by dragging on the week calendar,
-  owner approval, check-in through the resource's signed QR link, check-out.
-  It skips itself in the last hour before IST midnight, when there may be no
-  same-day slot left to book. Point it elsewhere with
+  the owner approving it in the approvals inbox (in a second browser),
+  check-in through the resource's signed QR link, check-out. In the last
+  minute before IST midnight, when nothing is left today, it books the first
+  half-hour of tomorrow instead. Point it elsewhere with
   `E2E_BASE_URL` (e.g. `http://localhost:8080` for docker compose); set
   `E2E_BROWSER_CHANNEL=chrome` to use an installed Chrome.
 - **Everything** — `npm test` at the repository root runs all three (the e2e
@@ -361,10 +364,17 @@ so run it against a demo deployment, not a real one).
 
 - **Multi-day equipment loans.** Bookings are same-day by design (§2b);
   lending equipment for days at a time needs its own model.
-- **Frontend screens** for the approvals inbox and admin (resources,
-  maintenance, incidents). The API for both exists; the PWA has sign-in and
-  registration, the resource directory, the week calendar, my bookings (with
-  the calendar-feed link), scanning, check-in and analytics.
+- **Changing the number of approval levels in one step.** While a resource
+  needs approval, the server checks a new owner list against the current
+  number of levels, and a new number of levels against the current owners,
+  so going from one level to two (or back) fails in either order. The admin
+  form explains this; the workaround is to switch approval off, change the
+  levels and owners, then switch it back on. A single request that takes
+  settings and owners together would remove the need.
+- **Looking up users by id.** `GET /api/users` lists and searches (admins,
+  at most 50 per request); there is no lookup by id, so names for ids in
+  incident and maintenance history come from that listing and can be missing
+  in large departments.
 - **Notifications** (email/push) — promotions, approvals and maintenance
   cancellations are visible only in the app today.
 
