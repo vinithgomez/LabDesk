@@ -1,9 +1,11 @@
 import { forwardRef, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { formatDuration } from "../../lib/api-errors";
 import type { Resource } from "../resources/use-resources";
-import { formatPeriod, formatTime } from "./format";
-import type { Interval } from "./grid";
-import type { Draft, PanelOutcome } from "./use-calendar";
+import { defaultRepeat, validateRepeat, type Repeat } from "../series/rrule";
+import { WEEKDAYS, formatPeriod, formatTime } from "./format";
+import { istDayKey, type Interval } from "./grid";
+import { seriesSummary, type Draft, type PanelOutcome } from "./use-calendar";
 
 interface BookingPanelProps {
   resource: Resource;
@@ -14,6 +16,8 @@ interface BookingPanelProps {
   outcome: PanelOutcome;
   onBook: (draft: Draft) => void;
   onJoinWaitlist: (draft: Draft) => void;
+  /** Book the slot every chosen weekday until a date (a series). */
+  onBookSeries: (draft: Draft, repeat: Repeat) => void;
   onClose: () => void;
 }
 
@@ -33,15 +37,20 @@ const offerWaitlist = (outcome: PanelOutcome) =>
  * offers the waitlist for the same time.
  */
 export const BookingPanel = forwardRef<HTMLSelectElement, BookingPanelProps>(function BookingPanel(
-  { resource, selection, endOptions, initialEnd, outcome, onBook, onJoinWaitlist, onClose },
+  { resource, selection, endOptions, initialEnd, outcome, onBook, onJoinWaitlist, onBookSeries, onClose },
   endRef,
 ) {
   const [end, setEnd] = useState<number | null>(initialEnd?.getTime() ?? null);
   const [purpose, setPurpose] = useState("");
   const [attendees, setAttendees] = useState(1);
+  const [repeating, setRepeating] = useState(false);
+  const [repeat, setRepeat] = useState<Repeat>(() => defaultRepeat(selection.start));
+  const [repeatError, setRepeatError] = useState<string | null>(null);
 
-  const busy = outcome.kind === "submitting" || outcome.kind === "joiningWaitlist";
-  const done = outcome.kind === "booked" || outcome.kind === "waitlisted";
+  const busy = outcome.kind === "submitting" || outcome.kind === "joiningWaitlist" || outcome.kind === "creatingSeries";
+  const done = outcome.kind === "booked" || outcome.kind === "waitlisted" || outcome.kind === "seriesCreated";
+  const toggleDay = (day: number) =>
+    setRepeat((r) => ({ ...r, days: r.days.includes(day) ? r.days.filter((d) => d !== day) : [...r.days, day] }));
   // After a conflict the chosen time may no longer be free; keep showing it.
   const stillFree = end !== null && endOptions.some((o) => o.getTime() === end);
   const choices = end !== null && !stillFree ? [new Date(end), ...endOptions] : endOptions;
@@ -50,7 +59,14 @@ export const BookingPanel = forwardRef<HTMLSelectElement, BookingPanelProps>(fun
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (draft && stillFree) onBook(draft);
+    if (!draft || !stillFree || busy) return;
+    if (!repeating) {
+      onBook(draft);
+      return;
+    }
+    const problem = validateRepeat(repeat, draft.start);
+    setRepeatError(problem);
+    if (!problem) onBookSeries(draft, repeat);
   };
 
   return (
@@ -113,6 +129,46 @@ export const BookingPanel = forwardRef<HTMLSelectElement, BookingPanelProps>(fun
               onChange={(e) => setAttendees(Number(e.target.value))}
             />
           </label>
+          <label className="flex items-center gap-2 text-sm text-slate-200">
+            <input
+              type="checkbox"
+              className="size-4 accent-indigo-500"
+              checked={repeating}
+              disabled={busy || done}
+              onChange={(e) => setRepeating(e.target.checked)}
+            />
+            Repeat weekly
+          </label>
+          {repeating && (
+            <fieldset className="flex flex-col gap-1.5 rounded-md border border-slate-800 p-2" disabled={busy || done} aria-describedby="repeat-hint">
+              <legend className="px-1 text-xs text-slate-400">Repeat on</legend>
+              <div className="flex flex-wrap gap-x-2 gap-y-1">
+                {WEEKDAYS.map((d) => (
+                  <label key={d.value} className="flex items-center gap-1 text-sm text-slate-200">
+                    <input type="checkbox" className="size-4 accent-indigo-500" checked={repeat.days.includes(d.value)} onChange={() => toggleDay(d.value)} />
+                    <abbr title={d.long} className="no-underline">
+                      {d.short}
+                    </abbr>
+                  </label>
+                ))}
+              </div>
+              <label className="flex flex-col gap-1 text-xs text-slate-400">
+                Repeat weekly until
+                <input
+                  type="date"
+                  className={control}
+                  min={istDayKey(selection.start)}
+                  value={repeat.until}
+                  onChange={(e) => setRepeat((r) => ({ ...r, until: e.target.value }))}
+                />
+              </label>
+              <p id="repeat-hint" className="text-[11px] text-slate-500">
+                Same time each chosen day, from the next one that's still ahead. Each date is booked separately; dates that are
+                taken are skipped.
+              </p>
+              {repeatError && <p className="text-xs text-rose-300">{repeatError}</p>}
+            </fieldset>
+          )}
         </>
       )}
 
@@ -121,6 +177,15 @@ export const BookingPanel = forwardRef<HTMLSelectElement, BookingPanelProps>(fun
       )}
       {outcome.kind === "failed" && <p className="rounded-md bg-rose-500/15 p-2 text-sm text-rose-200">{outcome.message}</p>}
       {outcome.kind === "waitlistFailed" && <p className="rounded-md bg-rose-500/15 p-2 text-sm text-rose-200">{outcome.message}</p>}
+      {outcome.kind === "seriesFailed" && <p className="rounded-md bg-rose-500/15 p-2 text-sm text-rose-200">{outcome.message}</p>}
+      {outcome.kind === "seriesCreated" && (
+        <p className="rounded-md bg-emerald-500/15 p-2 text-sm text-emerald-200">
+          {seriesSummary(outcome.series)}{" "}
+          <Link to={`/series/${outcome.series.id}`} className="font-medium text-emerald-100 underline">
+            View the series
+          </Link>
+        </p>
+      )}
       {outcome.kind === "booked" && (
         <p className="rounded-md bg-emerald-500/15 p-2 text-sm text-emerald-200">
           {outcome.booking.status === "pending" ? "Booked; waiting for approval." : "Booked and approved."}
@@ -142,7 +207,13 @@ export const BookingPanel = forwardRef<HTMLSelectElement, BookingPanelProps>(fun
           <>
             {draft && stillFree && (
               <button type="submit" disabled={busy} className={`${button} bg-indigo-600 text-white`}>
-                {outcome.kind === "submitting" ? "Booking…" : outcome.kind === "failed" ? "Try again" : "Book"}
+                {outcome.kind === "submitting" || outcome.kind === "creatingSeries"
+                  ? "Booking…"
+                  : outcome.kind === "failed" || outcome.kind === "seriesFailed"
+                    ? "Try again"
+                    : repeating
+                      ? "Book every week"
+                      : "Book"}
               </button>
             )}
             {draft && offerWaitlist(outcome) && (

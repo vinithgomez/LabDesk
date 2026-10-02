@@ -45,7 +45,7 @@ const mocked = vi.mocked(apiRequest);
  * With `hangMine`, refetching your bookings never answers, so only the
  * rollback can take an optimistic block away.
  */
-function fakeApi(onBook: (init: Init) => Promise<unknown>) {
+function fakeApi(onBook: (init: Init) => Promise<unknown>, onSeries: (init: Init) => Promise<unknown> = () => Promise.reject(new Error("no series expected"))) {
   const state = { busy: [] as BusyInterval[], hangMine: false };
   mocked.mockImplementation((path: string, init: Init) => {
     if (path === `/api/resources/${RESOURCE.id}`) return Promise.resolve(RESOURCE);
@@ -53,6 +53,7 @@ function fakeApi(onBook: (init: Init) => Promise<unknown>) {
     if (path.startsWith("/api/bookings?")) return state.hangMine ? new Promise(() => {}) : Promise.resolve([]);
     if (path === "/api/bookings" && init.method === "POST") return onBook(init);
     if (path === "/api/waitlist") return Promise.resolve({ id: "w1" });
+    if (path === "/api/series" && init.method === "POST") return onSeries(init);
     return Promise.reject(new Error(`unexpected ${init.method} ${path}`));
   });
   return state;
@@ -180,5 +181,97 @@ describe("booking from the calendar", () => {
     expect(await within(panel).findByText(sentence)).toBeInTheDocument();
     expect(within(panel).queryByText("server wording")).not.toBeInTheDocument();
     expect(within(panel).queryByRole("button", { name: "Join the waitlist" })).not.toBeInTheDocument();
+  });
+});
+
+describe("repeating a booking weekly", () => {
+  const seriesCalls = () => mocked.mock.calls.filter(([path]) => path === "/api/series");
+  const created = {
+    id: "s1",
+    occurrences: [{ bookingId: "b1", start: ist("2026-09-29T10:00:00"), end: ist("2026-09-29T11:00:00"), status: "approved" }],
+    skipped: [{ start: ist("2026-10-06T10:00:00"), end: ist("2026-10-06T11:00:00"), reason: "SLOT_CONFLICT", message: "", recordedAt: "" }],
+  };
+
+  it("sends exactly FREQ=WEEKLY;BYDAY=…;UNTIL=… with the slot's IST time and length", async () => {
+    const user = userEvent.setup();
+    fakeApi(() => Promise.reject(new Error("no single booking expected")), () => Promise.resolve(created));
+    renderCalendar();
+    const panel = await selectTuesdayTen(user);
+    await user.type(within(panel).getByLabelText("Purpose"), "Weekly lab");
+    await user.click(within(panel).getByLabelText("Repeat weekly"));
+    // Tuesday is pre-ticked; add Thursday and set the end date.
+    expect(within(panel).getByRole("checkbox", { name: "Tue" })).toBeChecked();
+    await user.click(within(panel).getByRole("checkbox", { name: "Thu" }));
+    const until = within(panel).getByLabelText("Repeat weekly until");
+    await user.clear(until);
+    await user.type(until, "2026-11-30");
+    await user.click(within(panel).getByRole("button", { name: "Book every week" }));
+
+    expect(await within(panel).findByText(/Repeating booking created: 1 date booked, 1 skipped\./)).toBeInTheDocument();
+    expect(within(panel).getByRole("link", { name: "View the series" })).toHaveAttribute("href", "/series/s1");
+    expect(seriesCalls()).toEqual([
+      [
+        "/api/series",
+        {
+          method: "POST",
+          body: {
+            resourceId: RESOURCE.id,
+            rrule: "FREQ=WEEKLY;BYDAY=TU,TH;UNTIL=20261130",
+            startTime: "10:00",
+            durationMinutes: 60,
+            purpose: "Weekly lab",
+            attendeeCount: 1,
+          },
+        },
+      ],
+    ]);
+    expect(screen.getByRole("status", { hidden: true })).toHaveTextContent("Repeating booking created: 1 date booked, 1 skipped.");
+  });
+
+  it("guards against a double submit: one request while one is in flight", async () => {
+    const user = userEvent.setup();
+    let answer: (v: unknown) => void = () => {};
+    fakeApi(() => Promise.reject(new Error("no single booking expected")), () => new Promise((resolve) => (answer = resolve)));
+    renderCalendar();
+    const panel = await selectTuesdayTen(user);
+    await user.click(within(panel).getByLabelText("Repeat weekly"));
+    const book = within(panel).getByRole("button", { name: "Book every week" });
+    await user.dblClick(book);
+    await user.keyboard("{Enter}");
+    expect(within(panel).getByRole("button", { name: "Booking…" })).toBeDisabled();
+    expect(seriesCalls()).toHaveLength(1);
+    answer(created);
+    expect(await within(panel).findByText(/Repeating booking created/)).toBeInTheDocument();
+    expect(seriesCalls()).toHaveLength(1);
+  });
+
+  it("needs a day and a sensible end date before sending", async () => {
+    const user = userEvent.setup();
+    fakeApi(() => Promise.reject(new Error("none")), () => Promise.reject(new Error("must not be called")));
+    renderCalendar();
+    const panel = await selectTuesdayTen(user);
+    await user.click(within(panel).getByLabelText("Repeat weekly"));
+    await user.click(within(panel).getByRole("checkbox", { name: "Tue" }));
+    await user.click(within(panel).getByRole("button", { name: "Book every week" }));
+    expect(within(panel).getByText("Choose at least one day of the week.")).toBeInTheDocument();
+    expect(seriesCalls()).toHaveLength(0);
+  });
+
+  it("explains INVALID_RRULE in a sentence", async () => {
+    const user = userEvent.setup();
+    fakeApi(
+      () => Promise.reject(new Error("none")),
+      () => Promise.reject(new ApiError(422, "INVALID_RRULE", "This rule has no occurrences left: its UNTIL has passed")),
+    );
+    renderCalendar();
+    const panel = await selectTuesdayTen(user);
+    await user.click(within(panel).getByLabelText("Repeat weekly"));
+    await user.click(within(panel).getByRole("button", { name: "Book every week" }));
+    expect(
+      await within(panel).findByText(
+        "That repeat pattern can't be used: choose at least one weekday and an end date late enough to include another occurrence.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(panel).queryByText(/UNTIL/)).not.toBeInTheDocument();
   });
 });

@@ -4,6 +4,8 @@ import { ApiError, apiRequest } from "../../lib/api";
 import { describeApiError } from "../../lib/api-errors";
 import type { Availability, Booking, NewBooking } from "../bookings/types";
 import type { Resource } from "../resources/use-resources";
+import { buildWeeklyRrule, seriesStartTime, type Repeat } from "../series/rrule";
+import type { SeriesDetail } from "../series/types";
 import { formatPeriod } from "./format";
 import { addDays, istDayStart, type DayKey } from "./grid";
 import { attemptSignature, nextAttempt, OPTIMISTIC_ID, outcomeUnknown, type Attempt } from "./model";
@@ -54,7 +56,10 @@ export type PanelOutcome =
   | { kind: "failed"; message: string; conflict: boolean }
   | { kind: "joiningWaitlist" }
   | { kind: "waitlisted" }
-  | { kind: "waitlistFailed"; message: string };
+  | { kind: "waitlistFailed"; message: string }
+  | { kind: "creatingSeries" }
+  | { kind: "seriesCreated"; series: SeriesDetail }
+  | { kind: "seriesFailed"; message: string };
 
 const newKey = () => crypto.randomUUID();
 
@@ -73,6 +78,8 @@ export function useBookingPanel(resource: Resource, weekStart: DayKey) {
   /** Text for the page's aria-live region: each result, once. */
   const [announcement, setAnnouncement] = useState("");
   const attempt = useRef<Attempt | null>(null);
+  // POST /api/series has no Idempotency-Key: never let a second submit start while one is in flight.
+  const seriesInFlight = useRef(false);
   const mineKey = myWeekKey(resource.id, weekStart);
 
   const create = useMutation({
@@ -166,11 +173,54 @@ export function useBookingPanel(resource: Resource, weekStart: DayKey) {
     [waitlist, resource],
   );
 
+  const series = useMutation({
+    mutationFn: (body: object) => apiRequest<SeriesDetail>("/api/series", { method: "POST", body }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["bookings"] });
+      void queryClient.invalidateQueries({ queryKey: ["availability", resource.id] });
+    },
+  });
+
+  /** A weekly repeat of the drafted slot (POST /api/series). Ignored while one is already in flight. */
+  const bookSeries = useCallback(
+    async (draft: Draft, repeat: Repeat) => {
+      if (seriesInFlight.current) return;
+      seriesInFlight.current = true;
+      setOutcome({ kind: "creatingSeries" });
+      try {
+        const created = await series.mutateAsync({
+          resourceId: resource.id,
+          rrule: buildWeeklyRrule(repeat),
+          startTime: seriesStartTime(draft.start),
+          durationMinutes: Math.round((draft.end.getTime() - draft.start.getTime()) / 60_000),
+          purpose: draft.purpose.trim(),
+          attendeeCount: draft.attendeeCount,
+        });
+        setOutcome({ kind: "seriesCreated", series: created });
+        setAnnouncement(seriesSummary(created));
+      } catch (err) {
+        const message = describeApiError(err, { resource, period: draft, now: new Date() });
+        setOutcome({ kind: "seriesFailed", message });
+        setAnnouncement(`Repeating booking not created. ${message}`);
+      } finally {
+        seriesInFlight.current = false;
+      }
+    },
+    [series, resource],
+  );
+
   /** A new selection: forget the last result (an unfinished attempt is kept for its retry). */
   const reset = useCallback(() => {
     setOutcome({ kind: "idle" });
     setAnnouncement("");
   }, []);
 
-  return { outcome, announcement, book, joinWaitlist, reset };
+  return { outcome, announcement, book, joinWaitlist, bookSeries, reset };
+}
+
+/** "Repeating booking created: 4 dates booked, 1 skipped." */
+export function seriesSummary(series: Pick<SeriesDetail, "occurrences" | "skipped">): string {
+  const booked = series.occurrences.length;
+  const skipped = series.skipped.length;
+  return `Repeating booking created: ${booked} date${booked === 1 ? "" : "s"} booked${skipped > 0 ? `, ${skipped} skipped` : ""}.`;
 }

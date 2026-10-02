@@ -148,6 +148,7 @@ function ResourceCalendar({ resource }: { resource: Resource }) {
               outcome={panel.outcome}
               onBook={(draft) => void panel.book(draft)}
               onJoinWaitlist={(draft) => void panel.joinWaitlist(draft)}
+              onBookSeries={(draft, repeat) => void panel.bookSeries(draft, repeat)}
               onClose={close}
             />
           ) : (

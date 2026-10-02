@@ -10,7 +10,8 @@ import {
   type OwnerDraft,
   type ResourceFormValues,
 } from "./resource-form";
-import { Field, Notice, WEEKDAYS, control, primary, secondary } from "./ui";
+import { WEEKDAYS } from "../calendar/format";
+import { Field, Notice, control, primary, secondary } from "./ui";
 import { describeSaveError, ownersOf, useSaveResource } from "./use-admin-resources";
 
 /** Create (original = null) or edit a resource, including its owners. */

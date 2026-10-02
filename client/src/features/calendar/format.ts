@@ -31,3 +31,14 @@ export function formatMinute(minute: number): string {
 
 /** "Fri 2 Oct, 10:15" */
 export const formatDateTime = (instant: Date) => formatInTimeZone(instant, IST, "EEE d MMM, HH:mm");
+
+/** Monday-first weekdays; value as in Date#getUTCDay (0 = Sunday). */
+export const WEEKDAYS: { value: number; short: string; long: string }[] = [
+  { value: 1, short: "Mon", long: "Monday" },
+  { value: 2, short: "Tue", long: "Tuesday" },
+  { value: 3, short: "Wed", long: "Wednesday" },
+  { value: 4, short: "Thu", long: "Thursday" },
+  { value: 5, short: "Fri", long: "Friday" },
+  { value: 6, short: "Sat", long: "Saturday" },
+  { value: 0, short: "Sun", long: "Sunday" },
+];

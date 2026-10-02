@@ -14,6 +14,7 @@ const RegisterPage = lazy(() => import("./features/auth/RegisterPage"));
 const ResourcesPage = lazy(() => import("./features/resources/ResourcesPage"));
 const CalendarPage = lazy(() => import("./features/calendar/CalendarPage"));
 const MyBookingsPage = lazy(() => import("./features/bookings/MyBookingsPage"));
+const SeriesPage = lazy(() => import("./features/series/SeriesPage"));
 const AnalyticsPage = lazy(() => import("./features/analytics/AnalyticsPage"));
 const ApprovalsPage = lazy(() => import("./features/approvals/ApprovalsPage"));
 const AdminPage = lazy(() => import("./features/admin/AdminPage"));
@@ -53,6 +54,7 @@ const router = createBrowserRouter([
       { path: "/resources", element: <RequireSession><ResourcesPage /></RequireSession> },
       { path: "/resources/:id", element: <RequireSession><CalendarPage /></RequireSession> },
       { path: "/bookings", element: <RequireSession><MyBookingsPage /></RequireSession> },
+      { path: "/series/:id", element: <RequireSession><SeriesPage /></RequireSession> },
       { path: "/scan", element: <RequireSession><ScanPage /></RequireSession> },
       { path: "/checkin", element: <RequireSession><CheckinLinkPage /></RequireSession> },
       { path: "/analytics", element: <RequireSession><AnalyticsPage /></RequireSession> },
