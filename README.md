@@ -120,12 +120,13 @@ as `PUBLIC_APP_URL` doesn't change.
   admin forms' validation. They run in a New York time zone so any leak of
   the machine's local time fails.
 - **End to end** — with the app running (either way above), `cd e2e && npm
-  install && npx playwright install chromium && npm test`. One happy path on
-  the real stack: register, sign in, book by dragging on the week calendar,
-  the owner approving it in the approvals inbox (in a second browser),
-  check-in through the resource's signed QR link, check-out. In the last
-  minute before IST midnight, when nothing is left today, it books the first
-  half-hour of tomorrow instead. Point it elsewhere with
+  install && npx playwright install chromium && npm test`. Two flows on the
+  real stack. One: a new student signs in, books tomorrow 10:00–11:00 IST by
+  dragging on the week calendar, and the owner approves it in the approvals
+  inbox (in a second browser); the fixed slot means the same steps run at
+  any time of day. Two: check-in and check-out through a resource's signed
+  QR link, on a booking that starts now (check-in follows the real clock),
+  made through the API on a separate fixture resource. Point it elsewhere with
   `E2E_BASE_URL` (e.g. `http://localhost:8080` for docker compose); set
   `E2E_BROWSER_CHANNEL=chrome` to use an installed Chrome.
 - **Everything** — `npm test` at the repository root runs all three (the e2e
