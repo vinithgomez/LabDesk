@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { describeApiError } from "../../lib/api-errors";
 import { useDepartments } from "../resources/use-resources";
+import { departmentError } from "./register-form";
 import { safeNext } from "./redirect";
 import { EyeIcon } from "./SignInForm";
 import { useSession } from "./use-session";
@@ -24,12 +25,20 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [departmentProblem, setDepartmentProblem] = useState<string | null>(null);
+  const departmentRef = useRef<HTMLSelectElement>(null);
   const set = (key: keyof typeof form) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
   if (status === "signedIn") return <Navigate to={next} replace />;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    const deptProblem = departmentError(form.departmentId);
+    setDepartmentProblem(deptProblem);
+    if (deptProblem) {
+      departmentRef.current?.focus();
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -88,7 +97,18 @@ export default function RegisterPage() {
       </label>
       <label className="flex flex-col gap-1 text-sm text-slate-300">
         Department
-        <select className={field} required value={form.departmentId} onChange={set("departmentId")} disabled={!departments.data}>
+        <select
+          ref={departmentRef}
+          className={field}
+          value={form.departmentId}
+          onChange={(e) => {
+            set("departmentId")(e);
+            setDepartmentProblem(null);
+          }}
+          disabled={!departments.data}
+          aria-invalid={departmentProblem !== null}
+          aria-describedby={departmentProblem ? "department-problem" : undefined}
+        >
           <option value="" disabled>
             {departments.isPending ? "Loading departments…" : "Choose your department"}
           </option>
@@ -99,10 +119,23 @@ export default function RegisterPage() {
           ))}
         </select>
       </label>
-      {departments.isError && (
-        <p role="alert" className="text-sm text-rose-300">
-          {describeApiError(departments.error)}
+      {departmentProblem && (
+        <p id="department-problem" role="alert" className="-mt-2 text-sm text-rose-300">
+          {departmentProblem}
         </p>
+      )}
+      {departments.isError && (
+        <div role="alert" className="-mt-1 flex flex-wrap items-center gap-2 text-sm text-rose-300">
+          <span>The department list didn't load. {describeApiError(departments.error)}</span>
+          <button
+            type="button"
+            onClick={() => void departments.refetch()}
+            disabled={departments.isFetching}
+            className="min-h-9 rounded-lg border border-slate-600 px-3 text-sm font-medium text-slate-200 disabled:opacity-60 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-400"
+          >
+            {departments.isFetching ? "Retrying…" : "Retry"}
+          </button>
+        </div>
       )}
       <label className="flex flex-col gap-1 text-sm text-slate-300">
         Roll number <span className="text-xs text-slate-500">(optional)</span>

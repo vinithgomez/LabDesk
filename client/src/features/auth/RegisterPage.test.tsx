@@ -48,6 +48,59 @@ async function fillForm(user: ReturnType<typeof userEvent.setup>) {
 
 // The session is module-level, so these run in order: refused first, then accepted.
 describe("RegisterPage", () => {
+  it("won't submit without a department, and says so", async () => {
+    const user = userEvent.setup();
+    vi.mocked(register).mockClear();
+    renderRegister();
+    await user.type(screen.getByLabelText("Full name"), "Priya Nair");
+    await user.type(screen.getByLabelText("College email"), "priya@college.edu");
+    await user.type(screen.getByLabelText(/^Password/), "long-enough-1");
+    await screen.findByRole("option", { name: /ECE/ });
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(screen.getByText("Choose your department", { selector: "#department-problem" })).toBeInTheDocument();
+    const select = screen.getByLabelText("Department");
+    expect(select).toHaveAttribute("aria-invalid", "true");
+    expect(select).toHaveAccessibleDescription("Choose your department");
+    expect(select).toHaveFocus();
+    expect(register).not.toHaveBeenCalled();
+
+    // Choosing one clears the message.
+    await user.selectOptions(select, "d-ece");
+    expect(screen.queryByText("Choose your department", { selector: "#department-problem" })).not.toBeInTheDocument();
+  });
+
+  it("offers Retry when the department list fails to load", async () => {
+    const user = userEvent.setup();
+    vi.mocked(refreshSession).mockResolvedValue(false);
+    let fail = true;
+    vi.mocked(apiRequest).mockImplementation((path: string) =>
+      path === "/api/departments"
+        ? fail
+          ? Promise.reject(new ApiError(0, "NETWORK", "offline"))
+          : Promise.resolve(DEPARTMENTS)
+        : Promise.reject(new Error(path)),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/register"]}>
+          <Routes>
+            <Route path="/register" element={<RegisterPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText(/The department list didn't load\. Couldn't reach LabDesk/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Department")).toBeDisabled();
+
+    fail = false;
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("option", { name: /ECE/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Department")).toBeEnabled();
+  });
+
   it("explains a refused registration in a sentence", async () => {
     const user = userEvent.setup();
     vi.mocked(register).mockRejectedValue(new ApiError(409, "EMAIL_TAKEN", "Email already registered"));
