@@ -86,6 +86,52 @@ These supersede anything earlier in this file that conflicts with them.
 
 **Known, accepted gaps carried into Phase 4+:** a resource's approval levels dropping from 2 to 1 while a booking awaits level 2 leaves that booking undecidable until its start time (cancellable in the meantime); a deactivated or demoted owner loses approval power but the owner row itself persists.
 
+**Scheduled job locking uses Redis, not Postgres advisory locks.** Each job acquires `SET lock:<job-name> <run-id> NX PX <ttl-ms>` before running and releases it (checking the value matches, to avoid releasing a lock another run since acquired) on completion. The TTL must comfortably exceed the job's expected run time, so a crashed worker's lock self-expires rather than starving every future run. This differs deliberately from the booking-insert lock: that one needs transaction scope tied to a single INSERT, which Postgres advisory locks fit naturally; a periodic job spanning many rows and an unbounded duration needs a lock that survives a crash on its own, which is what Redis's native TTL gives for free.
+
+**Check-in window is `[start − 15min, start + 15min]`, not the whole booking ±15.** The no-show sweeper marks `no_show` at exactly `now > start + 15min`, so check-in closes at that same instant — tying the window to the sweeper's own boundary avoids the window's edge depending on when the sweeper last happened to run. Check-out stays open until `end + 15min`, where the auto-complete job takes over.
+
+**`checkins` has separate check-in and check-out method/overrider columns** (`checkout_method`, `checkout_overridden_by`, alongside the existing check-in pair) — a session can be opened by QR and closed by manual override or vice versa, and Phase 6 utilization needs to distinguish a real check-out from an auto-completed one.
+
+**Manual-override permission is checked before booking-state.** An earlier draft checked state first, which leaked a booking's status to a user with no permission to see it via the error message. Permission always gates first, before any state-specific error can reveal anything.
+
+**Lapsed pending bookings (approved at level 1, no further action) are moved to `rejected` by a dedicated job**, not left pending indefinitely — this closes the gap Phase 3 deferred. `actor_id` is null and the audit action is `booking.expired`, distinguishing "nobody decided in time" from a booker's own cancellation.
+
+**Override limits:** staff cannot override their own booking; admins may only override within their own department, consistent with the approval rule.
+
+**`PUBLIC_APP_URL`** (in `.env.example`) is embedded in every generated QR code. Changing it after resources have printed QR codes invalidates them — treat it as effectively immutable once resources are in real use.
+
+**Overlapping check-in windows: one scan, one action, never chained.** When an active session and the next booking's window overlap, a scan checks out the active session and stops — it does not also check the user into the following booking in the same request. Checking into the next booking requires a separate, later scan. Known UX gap, not a safety issue: that follow-up scan's success panel reads identically to any ordinary check-in, with nothing distinguishing "you've just been checked into a different booking than the one you expected." Worth a distinct message eventually; not urgent.
+
+**Waitlist promotion is best-fit, not strict FIFO.** An older waiting entry whose desired window doesn't match the slot that just freed does not block a newer entry that does fit — it remains waiting and is reconsidered the next time a slot frees. The alternative (strict order blocking on a mismatched entry) would leave freed capacity idle, which contradicts the project's purpose. A promoted booking is created through the same insert path as any other booking — full exclusion-constraint and advisory-lock protection — and starts `pending` or `approved` per the resource's `requires_approval`, never auto-approved.
+
+**A waiting entry auto-expires once its desired window's start time passes** without promotion, consistent with the lapsed-pending-booking rule from Phase 3.
+
+**Series creation books the first pass of occurrences immediately, not only via the nightly materializer** — otherwise the creator sees nothing happen until the next 00:15 run. The materializer subsequently extends the series out to `booking_horizon_days` nightly, tracking its last-handled occurrence so concurrent or repeated runs never double-book.
+
+**A materialization conflict skips only that occurrence and continues the series**, recorded in a `booking_series_skips` table and surfaced via `GET /api/series/:id`. Skipped occurrences are not retried even if the slot later frees. **Known asymmetry, unresolved:** a paused series (booker deactivated, moved department, or resource inactive) records nothing — no skip, no audit trail — unlike a genuine slot conflict. Bring these into parity in a later phase so `GET /api/series/:id` reflects the full reason history, not only conflicts.
+
+**Additional schema, beyond §4:** `waitlist_entries` gains `purpose`, `attendee_count`, `booking_id`. `booking_series` gains `purpose`, `attendee_count`, `status`, `cancelled_at`, `materialized_through`. New table `booking_series_skips`.
+
+**§8's "notifies the user" on promotion is not implemented** — no notification channel exists yet in this project. Deferred to whenever email/push notifications are added, not a Phase 5 gap.
+
+**Known gap, low priority:** `POST /api/series` has no `Idempotency-Key`, unlike booking creation. A retried request creates a second parallel series. Worth adding before this project is considered feature-complete, not urgent given how infrequently series are created relative to individual bookings.
+
+**Additional error codes:** `SLOT_AVAILABLE` (409, returned when joining a waitlist for a slot that isn't actually held by anyone — book it directly instead), `WAITLIST_DUPLICATE` (409, one user may not hold two overlapping waiting entries on the same resource, enforced by a database constraint), `INVALID_RRULE` (422, only `FREQ=WEEKLY;BYDAY=…;UNTIL=…` is accepted), `INVALID_BUSINESS_HOURS` (422, a resource's configured opening time must be before its closing time).
+
+**Resources gain `business_hours_start`, `business_hours_end` (IST, default 08:00–18:00) and `business_days`** (default Monday–Friday). All utilization math is computed against each resource's own hours and days — never a hardcoded global window — and available-minutes accounting starts from the later of the query window's start or the resource's creation date, never before the resource existed.
+
+**Maintenance windows auto-cancel conflicting bookings, they do not block creation and are not merely flagged.** A maintenance window describes reality (the resource is actually unusable) and must always be creatable regardless of existing bookings — rejecting creation over a scheduling conflict would mean the system refuses to record that something is broken. Every booking (`pending`, `approved`, or `checked_in`) whose period overlaps a newly created maintenance window is cancelled automatically, with a distinct audit action (`booking.cancelled_by_maintenance`, not the booker's own `booking.cancelled`) and a reason readable directly on the booking's own status/detail response — since no notification channel exists yet (per the Phase 5 note above), the booker only learns this by checking their own booking, so it must be self-explanatory there, not buried in an audit log they can't see.
+
+**Utilization is capped to checked-in time within a resource's business hours and business days — on both axes, not hours alone — and can never exceed 100%.** Sessions are time-merged per resource before measuring, so overlapping check-in/check-out windows (a normal occurrence given the ±15-minute check-in/check-out tolerance from §7) are never double-counted; without merging, the cap could still be exceeded by realistic overlapping data. Time outside business hours/days is never discarded — it is reported separately (`offHoursMinutes` alongside `inHoursMinutes`, with `actualMinutes` = their sum) so nothing is hidden, only correctly categorized. The idle ranking and department totals use the same capped, merged figure.
+
+**No-show rate strictly excludes rejected, expired, and cancelled bookings from its denominator** — `no_show / (no_show + completed + checked_in)` only. These are not attendance outcomes and must not affect a metric meant to measure attendance behavior; a rejection or an unactioned approval is not the booker's fault. A separate "request outcome" breakdown (proportions of rejected/expired/completed) is deliberately not built — it would be a different, differently-labeled metric if added later.
+
+**Idle ranking requires 28 days of data, counted from the later of the query window's start or the resource's creation date** — never from a resource's first booking, since that would make a never-booked resource permanently unrankable and defeat the purpose of an idle ranking. Excluded resources are listed with a specific, human-readable reason (insufficient data with the actual day count, inactive, or no business hours configured), never silently omitted.
+
+**Heatmap shows booking demand (booked time), not usage (checked-in time).** All 168 day×hour cells are always returned, zero-filled via `generate_series`, in IST.
+
+**Analytics access is department-scoped like everything else**, with one deliberate asymmetry: admins default to their own department on analytics (unlike the resource list, where admins default to seeing everything) — analytics is a more sensitive, comparative view, so a narrower default is the safer one. Cross-department or all-department analytics requires an explicit admin request.
+
 **Additional endpoints** (beyond §9):
 ```
 GET    /api/departments                 public — signup form needs it
@@ -112,6 +158,18 @@ PATCH  /api/resources/:id/owners        TO BUILD IN PHASE 3
 **Versions:** Node 22, Prisma 6.19, Express 5, Zod 4. (Supersedes the Node 20 line in §3.)
 
 **Cookies:** refresh token scoped to `/api/auth`; `SameSite=None; Secure` in production, `Lax` in development.
+
+**Additional error code:** `MAINTENANCE_OVERLAP` (409, a maintenance window overlapping an existing one on the same resource).
+
+**Maintenance window behaviour.** A session in progress when a window is created is closed at the earlier of now and the window's start, recorded as an override by whoever created the window. A window must end in the future. Admins may create windows in any department: creating a window is a resource-management action, which is admin-any-department, unlike approvals, which are decisions on a specific request and stay department-scoped. Removing a window is a soft delete; bookings it cancelled stay cancelled.
+
+**Incidents.** "Had a booking" means the reporter's booking was `approved`, `checked_in`, `completed` or `no_show`. Only owners and admins may attach a report to someone else's booking. An `out_of_service` incident does not automatically deactivate the resource or create a maintenance window; a human decides that.
+
+**Calendar feeds.** The feed token is a signed value built from the user ID and a per-user feed version, never stored in the database. Regenerating bumps the version, which invalidates the old URL. Only the canonical encoding of a token is accepted; a non-canonical but equivalent spelling is rejected. Feeds look back 90 days and include only `approved`, `checked_in` and `completed` bookings. When `ICS_TOKEN_SECRET` is unset it is derived as HMAC-SHA256 of the JWT access secret over a fixed, purpose-specific label. Setting it explicitly to the JWT secret is refused at startup. **Never change the label**: doing so silently invalidates every feed URL already handed out.
+
+**Deployment shape.** `docker compose --env-file server/.env up --build` starts the whole seeded app at `http://localhost:8080` (nginx serves the PWA and proxies `/api`). For development, use `docker compose --env-file server/.env up -d postgres redis` and run the server and client with `npm run dev`. New optional settings: `PUBLIC_API_URL`, `COOKIE_SECURE`, `COOKIE_SAMESITE`, `ICS_TOKEN_SECRET`.
+
+**Known gaps at the end of Phase 7.** The frontend implements only sign-in, scan, check-in and analytics. The §11 week calendar, my-bookings, approvals inbox and admin screens are not built, and the Playwright flow books and approves through the API. Not yet built or fixed: notifications, a login rate limit, an `Idempotency-Key` on `POST /api/series`. The API image keeps dev dependencies because the Prisma CLI runs migrations. `npm audit` flags a pre-existing advisory in the Prisma CLI's dependencies. CI has never run on GitHub; the first real run happens on the first push.
 
 ---
 
@@ -418,6 +476,8 @@ tmp/
 ```
 
 `.env` is never committed; `.env.example` always is. **Never commit** credentials, tokens, keys, or database volumes, and never use `git add -f` to bypass `.gitignore`. If a secret is ever committed, stop and report it immediately rather than pushing — rotating it is the fix, deleting the file in a later commit is not.
+
+**Avoid syntax that trips secret scanners even when no secret is present.** Tools like GitGuardian pattern-match on shapes such as `PASSWORD:`, `SECRET:`, `TOKEN:` followed by a colon and text, regardless of whether a real value follows. This produces false-positive alerts on legitimate code (variable-expansion syntax, `.env.example` placeholders, doc comments). Where practical, prefer forms less likely to trigger a match without sacrificing clarity — e.g. in `.env.example` use obviously-fake placeholder values (`changeme`, `your-secret-here`) rather than a bare variable-required syntax; in YAML/compose files, a comment above the block explaining "values come from .env, never hardcoded here" reduces ambiguity for both scanners and human reviewers. This is a hygiene preference, not a hard rule — never let it override actually removing a real credential.
 
 ---
 
