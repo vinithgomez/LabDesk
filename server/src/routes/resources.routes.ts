@@ -72,9 +72,14 @@ export const createResourceBody = z
     path: ["minSlotMinutes"],
   });
 
-// Department and ownership are not editable via PATCH.
+/**
+ * Department is not editable. `owners`, when present, replaces the owner set
+ * in the same transaction as the other fields, and the final state (new
+ * settings with new owners) is what gets validated, so the number of
+ * approval levels and their owners can change together.
+ */
 export const updateResourceBody = z
-  .strictObject(resourceFields)
+  .strictObject({ ...resourceFields, owners: z.array(ownerInput).max(20) })
   .partial()
   .refine((b) => Object.keys(b).length > 0, { message: "Provide at least one field to update" });
 
@@ -233,12 +238,16 @@ export function resourcesRouter(
   router.patch("/:id", async (req, res) => {
     const actor = actorOf(req);
     const { id } = idParams.parse(req.params);
-    const patch = updateResourceBody.parse(req.body);
+    const { owners, ...patch } = updateResourceBody.parse(req.body);
 
     const resource = await resources.get(id);
     if (!can(actor, "resource:manage", resource)) throw denial(actor, "resource:manage", resource);
+    // Changing owners grants approval power: admin only, as on PATCH /:id/owners.
+    if (owners !== undefined && !can(actor, "resource:manage_owners", resource)) {
+      throw denial(actor, "resource:manage_owners", resource);
+    }
 
-    respond(res, 200, resourceDto, await resources.update(actor, id, patch));
+    respond(res, 200, resourceDto, await resources.update(actor, id, patch, owners));
   });
 
   router.patch("/:id/owners", async (req, res) => {

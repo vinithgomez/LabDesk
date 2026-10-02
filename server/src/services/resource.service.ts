@@ -55,8 +55,13 @@ export class ResourceService {
     });
   }
 
-  update(actor: Actor, id: string, patch: Partial<ResourceFields>): Promise<Resource> {
-    return this.applyChange(actor, id, patch, "resource.updated");
+  /**
+   * Updates fields and, when `owners` is given, replaces the owner set in the
+   * same transaction. Callers passing `owners` must also have passed
+   * `can(actor, "resource:manage_owners", ...)`.
+   */
+  update(actor: Actor, id: string, patch: Partial<ResourceFields>, owners?: ResourceOwner[]): Promise<Resource> {
+    return this.applyChange(actor, id, patch, "resource.updated", owners);
   }
 
   /** Soft delete: bookings (Phase 2+) will reference resources, so rows are never removed. */
@@ -89,12 +94,22 @@ export class ResourceService {
     });
   }
 
+  /**
+   * Fields, and optionally the owner set, in one transaction. What is
+   * validated is the final state: the merged settings with the owners the
+   * resource will have afterwards (the new ones if given, else the current).
+   * requires_approval is written only if the patch itself changes it, so a
+   * concurrent booking (which takes FOR SHARE on this row) sees either the
+   * whole old state or the whole new one.
+   */
   private applyChange(
     actor: Actor,
     id: string,
     patch: Partial<ResourceFields>,
     action: "resource.updated" | "resource.deactivated",
+    owners?: ResourceOwner[],
   ): Promise<Resource> {
+    if (owners) assertUniqueOwners(owners);
     return this.uow.transaction(async (tx) => {
       await tx.resources.lockById(id);
       const before = await tx.resources.findById(id);
@@ -102,15 +117,36 @@ export class ResourceService {
       const merged = { ...before, ...patch };
       assertSlotBounds(merged.minSlotMinutes, merged.maxSlotMinutes);
       assertBusinessHours(merged.businessHoursStart, merged.businessHoursEnd);
-      // Approval settings can't be changed into a state the current owners
-      // can't serve (e.g. requiring approval with no owners, or a second
-      // level nobody owns).
-      assertOwnerLevelsInRange(merged, before.owners);
-      assertApprovalLevelsCovered(merged, before.owners);
+      if (owners) {
+        // Eligibility, level range and coverage, against the final settings.
+        await assertValidOwners(tx, merged, owners, before.departmentId);
+      } else {
+        // Approval settings can't be changed into a state the current owners
+        // can't serve (e.g. requiring approval with no owners, or a second
+        // level nobody owns).
+        assertOwnerLevelsInRange(merged, before.owners);
+        assertApprovalLevelsCovered(merged, before.owners);
+      }
 
-      const after = await tx.resources.update(id, patch);
-      await tx.writeAudit({ actorId: actor.id, entityType: "resource", entityId: id, action, before, after });
-      return after;
+      let current = before;
+      if (Object.keys(patch).length > 0) {
+        const after = await tx.resources.update(id, patch);
+        await tx.writeAudit({ actorId: actor.id, entityType: "resource", entityId: id, action, before: current, after });
+        current = after;
+      }
+      if (owners) {
+        const after = await tx.resources.replaceOwners(id, owners);
+        await tx.writeAudit({
+          actorId: actor.id,
+          entityType: "resource",
+          entityId: id,
+          action: "resource.owners_changed",
+          before: current,
+          after,
+        });
+        current = after;
+      }
+      return current;
     });
   }
 }
