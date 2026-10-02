@@ -181,32 +181,20 @@ export function ownersChanged(original: readonly OwnerDraft[], next: readonly Ow
   return ownerKey(original) !== ownerKey(next);
 }
 
-/** Whether `owners` satisfy `config` the way the server checks them (range, then coverage). */
-function ownersFit(config: { requiresApproval: boolean; approvalLevels: number }, owners: readonly OwnerDraft[]): boolean {
-  return ownersOutOfRange(config, owners).length === 0 && missingOwnerLevels(config, owners).length === 0;
-}
+/** A resource's owners as the form edits them. */
+export const ownersOf = (r: Pick<Resource, "owners">): OwnerDraft[] =>
+  r.owners.map((o) => ({ userId: o.userId, approvalLevel: o.approvalLevel === 2 ? 2 : 1 }));
 
-export type SaveOrder = "fields" | "owners" | "fields-then-owners" | "owners-then-fields" | "nothing" | "impossible";
+export type UpdateBody = Partial<ResourceFields> & { owners?: OwnerDraft[] };
 
 /**
- * Fields and owners are separate requests, and the server checks each
- * against the other's current state. Owners go first when the new owners
- * fit the current settings; otherwise settings go first when the current
- * owners fit the new settings. If neither order works (e.g. dropping from
- * two approval levels to one while level 2 has owners) it can't be saved
- * in two steps without switching approval off in between.
+ * PATCH /api/resources/:id: the changed settings and, if the owner set
+ * changed, the new owners, in one request (null when nothing changed). The
+ * server validates them together, so the number of approval levels and its
+ * owners can change at once.
  */
-export function saveOrder(
-  current: { requiresApproval: boolean; approvalLevels: number },
-  currentOwners: readonly OwnerDraft[],
-  nextFields: Partial<ResourceFields> | null,
-  nextOwners: readonly OwnerDraft[] | null,
-): SaveOrder {
-  if (!nextFields && !nextOwners) return "nothing";
-  if (!nextOwners) return "fields";
-  if (!nextFields) return "owners";
-  const nextConfig = { ...current, ...nextFields };
-  if (ownersFit(current, nextOwners)) return "owners-then-fields";
-  if (ownersFit(nextConfig, currentOwners)) return "fields-then-owners";
-  return "impossible";
+export function toUpdateBody(v: ResourceFormValues, original: Resource, owners: readonly OwnerDraft[]): UpdateBody | null {
+  const body: UpdateBody = { ...(toPatchBody(v, original) ?? {}) };
+  if (ownersChanged(ownersOf(original), owners)) body.owners = owners.map((o) => ({ ...o }));
+  return Object.keys(body).length > 0 ? body : null;
 }

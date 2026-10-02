@@ -364,13 +364,6 @@ so run it against a demo deployment, not a real one).
 
 - **Multi-day equipment loans.** Bookings are same-day by design (§2b);
   lending equipment for days at a time needs its own model.
-- **Changing the number of approval levels in one step.** While a resource
-  needs approval, the server checks a new owner list against the current
-  number of levels, and a new number of levels against the current owners,
-  so going from one level to two (or back) fails in either order. The admin
-  form explains this; the workaround is to switch approval off, change the
-  levels and owners, then switch it back on. A single request that takes
-  settings and owners together would remove the need.
 - **Looking up users by id.** `GET /api/users` lists and searches (admins,
   at most 50 per request); there is no lookup by id, so names for ids in
   incident and maintenance history come from that listing and can be missing

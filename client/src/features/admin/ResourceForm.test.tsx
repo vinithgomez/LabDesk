@@ -128,9 +128,9 @@ describe("ResourceForm validation", () => {
     ).toBeInTheDocument();
   });
 
-  it("refuses an edit that changes the number of approval levels while approval is on", async () => {
+  it("changes the number of approval levels and the owners for it in one request, approval staying on", async () => {
     const user = userEvent.setup();
-    fakeApi(() => Promise.reject(new Error("must not be called")));
+    fakeApi((path, init) => Promise.resolve({ id: "r1", name: "GPU Box", path, init }));
     const original: Resource = {
       id: "r1",
       departmentId: "d1",
@@ -159,10 +159,56 @@ describe("ResourceForm validation", () => {
     const owners = screen.getByRole("group", { name: "Owners (they approve and manage it)" });
     expect(within(owners).getByText(/Dr\. Anita Rao/)).toBeInTheDocument();
 
-    // Valid as a whole (an owner at each level), but the server checks owners
-    // and levels in separate requests, each against the other's old state.
+    // One PATCH carries the new level count and the owners for it; the server
+    // validates them together. Approval is never switched off.
     await user.click(screen.getByRole("button", { name: "Save changes" }));
-    expect(await screen.findByText(/This can't be saved in one go/)).toBeInTheDocument();
-    expect(writes()).toHaveLength(0);
+    await vi.waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0]).toEqual([
+      "/api/resources/r1",
+      {
+        method: "PATCH",
+        body: {
+          approvalLevels: 2,
+          owners: [
+            { userId: "u-anita", approvalLevel: 1 },
+            { userId: "u-kumar", approvalLevel: 2 },
+          ],
+        },
+      },
+    ]);
+    expect(screen.queryByText(/can't be saved/)).not.toBeInTheDocument();
+  });
+
+  it("still names the missing level if the server refuses with OWNER_REQUIRED", async () => {
+    const user = userEvent.setup();
+    fakeApi(() =>
+      Promise.reject(new ApiError(422, "OWNER_REQUIRED", "missing", { missingLevels: [2] })),
+    );
+    renderForm({
+      id: "r1",
+      departmentId: "d1",
+      name: "GPU Box",
+      type: "equipment",
+      location: "Room 214",
+      capacity: 1,
+      description: "",
+      requiresApproval: true,
+      approvalLevels: 1,
+      minSlotMinutes: 30,
+      maxSlotMinutes: 180,
+      bookingHorizonDays: 14,
+      businessHoursStart: "08:00",
+      businessHoursEnd: "18:00",
+      businessDays: [1, 2, 3, 4, 5],
+      isActive: true,
+      ownerIds: ["u-anita"],
+      owners: [{ userId: "u-anita", approvalLevel: 1 }],
+    });
+    await user.clear(screen.getByLabelText("Capacity (people)"));
+    await user.type(screen.getByLabelText("Capacity (people)"), "2");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(
+      await screen.findByText("Bookings here need approval, so add an owner at level 2: every approval level in use needs at least one owner."),
+    ).toBeInTheDocument();
   });
 });

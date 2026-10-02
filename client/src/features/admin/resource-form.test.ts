@@ -5,9 +5,9 @@ import {
   formFromResource,
   missingOwnerLevels,
   ownersChanged,
-  saveOrder,
   toCreateBody,
   toPatchBody,
+  toUpdateBody,
   validateResourceForm,
   type OwnerDraft,
   type ResourceFormValues,
@@ -134,38 +134,38 @@ describe("request bodies", () => {
   });
 });
 
-describe("saveOrder", () => {
-  const one = { requiresApproval: true, approvalLevels: 1 };
-  const none = { requiresApproval: false, approvalLevels: 1 };
-  const two = { requiresApproval: true, approvalLevels: 2 };
+describe("toUpdateBody", () => {
+  const form = formFromResource(resource); // two levels, owners a@1 and b@2
 
-  it("sends one request when only one side changed", () => {
-    expect(saveOrder(one, [A1], null, null)).toBe("nothing");
-    expect(saveOrder(one, [A1], { capacity: 5 }, null)).toBe("fields");
-    expect(saveOrder(one, [A1], null, [A1, { userId: "c", approvalLevel: 1 }])).toBe("owners");
+  it("is null when nothing changed, owners included (in any order)", () => {
+    expect(toUpdateBody(form, resource, [A1, B2])).toBeNull();
+    expect(toUpdateBody(form, resource, [B2, A1])).toBeNull();
   });
 
-  it("adds owners before turning approval on", () => {
-    expect(saveOrder(none, [], { requiresApproval: true }, [A1])).toBe("owners-then-fields");
+  it("sends only changed settings when the owners are unchanged", () => {
+    expect(toUpdateBody({ ...form, capacity: "12" }, resource, [A1, B2])).toEqual({ capacity: 12 });
   });
 
-  it("turns approval off before removing the last owners", () => {
-    expect(saveOrder(one, [A1], { requiresApproval: false }, [])).toBe("fields-then-owners");
+  it("sends only the owners when only they changed", () => {
+    expect(toUpdateBody(form, resource, [A1, { userId: "c", approvalLevel: 2 }])).toEqual({
+      owners: [A1, { userId: "c", approvalLevel: 2 }],
+    });
   });
 
-  // The server checks owners against the current levels and levels against
-  // the current owners, so changing the level count on a resource that
-  // needs approval can't be done in either order.
-  it("can't go from one level to two with a new level 2 owner", () => {
-    expect(saveOrder(one, [A1], { approvalLevels: 2 }, [A1, B2])).toBe("impossible");
+  it("sends a change of approval levels and the owners for it together, in one body", () => {
+    // Two levels down to one: dropping the level-2 owner in the same request.
+    expect(toUpdateBody({ ...form, approvalLevels: 1 }, resource, [A1])).toEqual({ approvalLevels: 1, owners: [A1] });
+    // One level up to two, with the new level-2 owner.
+    const oneLevel = { ...resource, approvalLevels: 1, owners: [A1] };
+    expect(toUpdateBody({ ...formFromResource(oneLevel), approvalLevels: 2 }, oneLevel, [A1, B2])).toEqual({
+      approvalLevels: 2,
+      owners: [A1, B2],
+    });
   });
 
-  it("can't drop from two levels to one while level 2 has owners", () => {
-    expect(saveOrder(two, [A1, B2], { approvalLevels: 1 }, [A1])).toBe("impossible");
-  });
-
-  it("can change levels while approval is off", () => {
-    expect(saveOrder(none, [A1], { approvalLevels: 2 }, null)).toBe("fields");
-    expect(saveOrder({ requiresApproval: false, approvalLevels: 2 }, [A1, B2], { approvalLevels: 1 }, [A1])).toBe("owners-then-fields");
+  it("never switches approval off on its own", () => {
+    const oneLevel = { ...resource, approvalLevels: 1, owners: [A1] };
+    const body = toUpdateBody({ ...formFromResource(oneLevel), approvalLevels: 2 }, oneLevel, [A1, B2]);
+    expect(body).not.toHaveProperty("requiresApproval");
   });
 });

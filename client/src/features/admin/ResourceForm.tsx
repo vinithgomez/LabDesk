@@ -1,10 +1,12 @@
 import { useState, type FormEvent } from "react";
 import { RESOURCE_TYPES, type Department, type Resource, type ResourceType } from "../resources/use-resources";
 import { OwnersEditor } from "./OwnersEditor";
+import { describeApiError } from "../../lib/api-errors";
 import {
   emptyResourceForm,
   formFromResource,
   hasErrors,
+  ownersOf,
   validateResourceForm,
   type FormErrors,
   type OwnerDraft,
@@ -12,7 +14,7 @@ import {
 } from "./resource-form";
 import { WEEKDAYS } from "../calendar/format";
 import { Field, Notice, control, primary, secondary } from "./ui";
-import { describeSaveError, ownersOf, useSaveResource } from "./use-admin-resources";
+import { useSaveResource } from "./use-admin-resources";
 
 /** Create (original = null) or edit a resource, including its owners. */
 export function ResourceForm({
@@ -131,7 +133,7 @@ export function ResourceForm({
       <OwnersEditor departmentId={values.departmentId} owners={owners} levels={values.approvalLevels} error={errors.owners} onChange={setOwners} />
 
       {hasErrors(errors) && <Notice tone="error">Fix the highlighted fields first.</Notice>}
-      {save.isError && <Notice tone="error">{describeSaveError(save.error)}</Notice>}
+      {save.isError && <Notice tone="error">{describeApiError(save.error)}</Notice>}
 
       <div className="flex gap-2">
         <button type="submit" disabled={save.isPending} className={primary}>
