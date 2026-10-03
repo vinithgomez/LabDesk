@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Page } from "@playwright/test";
 import { accounts, Api } from "./stack.js";
 
 interface Resource {
@@ -22,7 +22,7 @@ const istDate = (d: Date) => new Date(d.getTime() + IST_OFFSET).toISOString().sl
 /** The instant of an IST wall-clock time on an IST date. */
 const istInstant = (date: string, hhmm: string) => new Date(`${date}T${hhmm}:00+05:30`);
 
-/** Booked through the calendar, tomorrow at a fixed hour: needs approval, owned by the owner account. */
+/** Booked through the calendar, next Monday at a fixed hour: needs approval, owned by the owner account. */
 const BOOKING_LAB = {
   name: "E2E Lab",
   type: "lab",
@@ -31,10 +31,11 @@ const BOOKING_LAB = {
   requiresApproval: true,
   approvalLevels: 1,
   // Pinned every run, so an older version of this test can't leave it different.
-  settings: { minSlotMinutes: 30, maxSlotMinutes: 120, bookingHorizonDays: 7, businessHoursStart: "08:00", businessHoursEnd: "18:00" },
+  // Next Monday is at most 7 days and 11 hours away, so 14 days always covers it.
+  settings: { minSlotMinutes: 30, maxSlotMinutes: 120, bookingHorizonDays: 14, businessHoursStart: "08:00", businessHoursEnd: "18:00" },
 };
-const TOMORROW_START = "10:00";
-const TOMORROW_END = "11:00";
+const SLOT_START = "10:00";
+const SLOT_END = "11:00";
 
 /**
  * For checking in: bookings here are approved on creation, and a short
@@ -99,23 +100,40 @@ async function freshStudent(baseURL: string, departmentId: string) {
 }
 
 /**
- * Booking and approval, all through the UI: a fresh student books tomorrow
- * 10:00–11:00 IST by dragging on the week calendar, and the resource's owner
- * approves it in the approvals inbox in a second browser. Tomorrow at a fixed
- * hour means the same steps run whatever the time of day.
+ * Next Monday's IST date, as seen at `now`: 1 to 7 days ahead, never today
+ * (on a Monday it's the following Monday). Pure arithmetic on the IST
+ * weekday (Monday 0 … Sunday 6), so there is no branch on the day.
  */
-test("book on the calendar, approve in the inbox", async ({ page, browser, baseURL }) => {
-  if (!baseURL) throw new Error("baseURL is not configured");
+function nextMonday(now: Date): string {
+  const mondayBased = (new Date(now.getTime() + IST_OFFSET).getUTCDay() + 6) % 7;
+  return istDate(new Date(now.getTime() + (7 - mondayBased) * DAY));
+}
+
+/**
+ * Booking and approval, all through the UI: a fresh student books next
+ * Monday 10:00–11:00 IST by dragging on the week calendar, and the
+ * resource's owner approves it in the approvals inbox in a second browser.
+ *
+ * Next Monday is always on next week's page (the grid runs Monday to
+ * Sunday), so the test always clicks "Next week" once, and no step depends
+ * on the day of the week or the time of day.
+ *
+ * `now` is when the student's browser thinks it is. The server keeps the
+ * real time, so any `now` must leave next Monday's slot in the real future
+ * and within the horizon.
+ */
+async function bookAndApprove({ page, browser, baseURL, now }: { page: Page; browser: Browser; baseURL: string; now: Date }) {
   const who = accounts();
   const admin = await Api.signIn(baseURL, who.admin);
   const owner = await Api.signIn(baseURL, who.owner);
   const lab = await fixtureResource(admin, owner, BOOKING_LAB);
 
-  const tomorrow = istDate(new Date(Date.now() + DAY));
-  const start = istInstant(tomorrow, TOMORROW_START);
-  const end = istInstant(tomorrow, TOMORROW_END);
-  // The horizon allows it: tomorrow's slot ends well within 7 days of now.
-  expect(lab.bookingHorizonDays).toBeGreaterThanOrEqual(2);
+  const monday = nextMonday(now);
+  const start = istInstant(monday, SLOT_START);
+  const end = istInstant(monday, SLOT_END);
+  // The horizon (14 days) allows it, measured from the server's real now.
+  expect(lab.bookingHorizonDays).toBe(14);
+  expect(start.getTime()).toBeGreaterThan(Date.now());
   expect(end.getTime()).toBeLessThan(Date.now() + lab.bookingHorizonDays * DAY);
   await clearHolds(owner, lab.id, start, end);
 
@@ -124,14 +142,16 @@ test("book on the calendar, approve in the inbox", async ({ page, browser, baseU
   await page.getByRole("link", { name: BOOKING_LAB.name, exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/resources/${lab.id}$`));
   await expect(page.locator("[role=gridcell]").first()).toBeVisible();
-  // The grid shows Monday to Sunday: from a Sunday, tomorrow is on next week's page.
-  if ((await page.locator(`[role=gridcell][data-day="${tomorrow}"]`).count()) === 0) {
-    await page.getByRole("button", { name: "Next week" }).click();
-  }
+  // The calendar opens on the week of the browser's "today", which is `now`.
+  await expect(page.locator(`[role=gridcell][data-day="${istDate(now)}"]`).first()).toBeAttached();
+  await expect(page.locator(`[role=gridcell][data-day="${monday}"]`)).toHaveCount(0); // next Monday isn't on this page…
+  await page.getByRole("button", { name: "Next week" }).click();
+  // …and the first column of the next.
+  await expect(page.getByRole("columnheader").nth(1)).toHaveAccessibleName(new RegExp(`^Monday ${Number(monday.slice(8))} `));
 
   // Drag 10:00 → 10:30 (two half-hour rows: 10:00–11:00).
-  const from = page.locator(`[role=gridcell][data-day="${tomorrow}"][data-time="10:00"]`);
-  const to = page.locator(`[role=gridcell][data-day="${tomorrow}"][data-time="10:30"]`);
+  const from = page.locator(`[role=gridcell][data-day="${monday}"][data-time="10:00"]`);
+  const to = page.locator(`[role=gridcell][data-day="${monday}"][data-time="10:30"]`);
   await expect(from).toHaveAttribute("aria-disabled", "false");
   await from.hover();
   await page.mouse.down();
@@ -139,7 +159,7 @@ test("book on the calendar, approve in the inbox", async ({ page, browser, baseU
   await page.mouse.up();
 
   const panel = page.getByRole("form", { name: "New booking" });
-  await expect(panel.getByRole("heading")).toHaveText(/, 10:00–11:00$/);
+  await expect(panel.getByRole("heading")).toHaveText(/^Mon \d+ \w+, 10:00–11:00$/);
   await panel.getByLabel("Purpose").fill("End-to-end test");
   await panel.getByRole("button", { name: "Book", exact: true }).click();
   await expect(panel.getByText("Booked; waiting for approval.")).toBeVisible();
@@ -152,7 +172,7 @@ test("book on the calendar, approve in the inbox", async ({ page, browser, baseU
   expect(new Date(booking.start)).toEqual(start);
   expect(new Date(booking.end)).toEqual(end);
 
-  // The owner approves it in the approvals inbox, in their own browser.
+  // The owner approves it in the approvals inbox, in their own browser (on the real clock).
   const ownerContext = await browser.newContext();
   const ownerPage = await ownerContext.newPage();
   await signInThroughUi(ownerPage, who.owner);
@@ -169,7 +189,39 @@ test("book on the calendar, approve in the inbox", async ({ page, browser, baseU
   expect((await student.api.call<Booking>("GET", `/api/bookings/${booking.id}`)).data.status).toBe("approved");
 
   await Promise.all([admin.dispose(), owner.dispose(), student.api.dispose()]);
+  return { monday };
+}
+
+test("book on the calendar, approve in the inbox", async ({ page, browser, baseURL }) => {
+  if (!baseURL) throw new Error("baseURL is not configured");
+  await bookAndApprove({ page, browser, baseURL, now: new Date() });
 });
+
+/**
+ * The same flow with the student's browser clock pinned to 12:00 IST on a
+ * Monday, a Wednesday and a Sunday, so every kind of day is exercised
+ * whatever day the suite runs. Each is the next such day within a week of
+ * the real date (today counts), which keeps next Monday's slot in the real
+ * future and inside the horizon for the server, which keeps real time.
+ */
+for (const [name, weekday, expectedDaysAhead] of [
+  ["Monday", 1, 7],
+  ["Wednesday", 3, 5],
+  ["Sunday", 0, 1],
+] as const) {
+  test(`book on the calendar as if today were a ${name}`, async ({ page, browser, baseURL }) => {
+    if (!baseURL) throw new Error("baseURL is not configured");
+    const realNow = new Date();
+    const realWeekday = new Date(realNow.getTime() + IST_OFFSET).getUTCDay();
+    const fakeDay = istDate(new Date(realNow.getTime() + ((weekday - realWeekday + 7) % 7) * DAY));
+    const fakeNow = istInstant(fakeDay, "12:00");
+    await page.clock.setFixedTime(fakeNow);
+
+    const { monday } = await bookAndApprove({ page, browser, baseURL, now: fakeNow });
+    expect(new Date(`${fakeDay}T00:00:00Z`).getUTCDay()).toBe(weekday);
+    expect((Date.parse(`${monday}T00:00:00Z`) - Date.parse(`${fakeDay}T00:00:00Z`)) / DAY).toBe(expectedDaysAhead);
+  });
+}
 
 /**
  * Check-in and check-out through the resource's signed QR link. Check-in

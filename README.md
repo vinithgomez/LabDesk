@@ -121,10 +121,13 @@ as `PUBLIC_APP_URL` doesn't change.
   the machine's local time fails.
 - **End to end** — with the app running (either way above), `cd e2e && npm
   install && npx playwright install chromium && npm test`. Two flows on the
-  real stack. One: a new student signs in, books tomorrow 10:00–11:00 IST by
-  dragging on the week calendar, and the owner approves it in the approvals
-  inbox (in a second browser); the fixed slot means the same steps run at
-  any time of day. Two: check-in and check-out through a resource's signed
+  real stack. One: a new student signs in, opens next week's page and books
+  next Monday 10:00–11:00 IST by dragging on the week calendar (on a Monday,
+  the following Monday), and the owner approves it in the approvals inbox
+  (in a second browser). Next Monday is always on next week's page, so no
+  step depends on the day or the time; the same flow also runs with the
+  student's browser clock pinned to a Monday, a Wednesday and a Sunday.
+  Two: check-in and check-out through a resource's signed
   QR link, on a booking that starts now (check-in follows the real clock),
   made through the API on a separate fixture resource. Point it elsewhere with
   `E2E_BASE_URL` (e.g. `http://localhost:8080` for docker compose); set
