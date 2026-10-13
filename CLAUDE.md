@@ -218,7 +218,7 @@ PATCH  /api/resources/:id/owners        TO BUILD IN PHASE 3
 - Playwright — one end-to-end happy-path booking flow
 - Docker Compose for local dev
 - GitHub Actions: lint → typecheck → test → build
-- Deploy: backend on Railway/Render, frontend on Vercel, managed Postgres
+- Deploy (documentation only, not planned): backend on Railway/Render, frontend on Vercel, managed Postgres
 
 ---
 
@@ -436,16 +436,16 @@ Complete and test each phase before moving on. Commit at meaningful boundaries �
 - **Phase 4** — QR generation, check-in/out, no-show sweeper, manual override, PWA scan screen. *Project is demo-ready at the end of this phase.*
 - **Phase 5** — Waitlist + promotion job, recurring series + materializer.
 - **Phase 6** — Analytics SQL, dashboard UI, seed script generating 8 weeks of realistic data for the demo.
-- **Phase 7** — ICS feeds, maintenance & incidents, Playwright e2e, CI pipeline, deploy, README with architecture diagram.
+- **Phase 7** — ICS feeds, maintenance & incidents, Playwright e2e, CI pipeline, deploy guide (documentation only; nothing is hosted), README with architecture diagram.
 
 ---
 
 ## 13. Definition of done
 
-- `docker compose up` gives a working app with seeded data
+- `docker compose --env-file server/.env up --build` gives a working, seeded app at `http://localhost:8080`
 - `npm test` passes, including the concurrency test
-- README contains: problem statement, architecture diagram, the exclusion-constraint explanation, local setup, deploy notes
-- Deployed URL is live and seeded
+- README contains: problem statement, architecture diagram, the exclusion-constraint explanation, local setup, deploy notes, and screenshots of the main screens
+- **Hosting is out of scope, by the owner's decision.** The project runs locally and in CI only. The README's deploy guide documents how it could be hosted, but nothing is deployed, so neither the README nor any resume text may claim a live URL or a deployment.
 - No secrets committed; `.env.example` present
 
 ---
