@@ -22,6 +22,13 @@ const istDate = (d: Date) => new Date(d.getTime() + IST_OFFSET).toISOString().sl
 /** The instant of an IST wall-clock time on an IST date. */
 const istInstant = (date: string, hhmm: string) => new Date(`${date}T${hhmm}:00+05:30`);
 
+/**
+ * Fixtures below exist only because this suite creates them; the demo seed
+ * never does. Run against a local stack, they stay until the database is
+ * reset (README: "Reset demo data").
+ */
+const FIXTURE_NOTE = "Automated end-to-end test fixture, created by the Playwright suite. Not part of the demo data.";
+
 /** Booked through the calendar, next Monday at a fixed hour: needs approval, owned by the owner account. */
 const BOOKING_LAB = {
   name: "E2E Lab",
@@ -32,7 +39,14 @@ const BOOKING_LAB = {
   approvalLevels: 1,
   // Pinned every run, so an older version of this test can't leave it different.
   // Next Monday is at most 7 days and 11 hours away, so 14 days always covers it.
-  settings: { minSlotMinutes: 30, maxSlotMinutes: 120, bookingHorizonDays: 14, businessHoursStart: "08:00", businessHoursEnd: "18:00" },
+  settings: {
+    description: FIXTURE_NOTE,
+    minSlotMinutes: 30,
+    maxSlotMinutes: 120,
+    bookingHorizonDays: 14,
+    businessHoursStart: "08:00",
+    businessHoursEnd: "18:00",
+  },
 };
 const SLOT_START = "10:00";
 const SLOT_END = "11:00";
@@ -49,7 +63,7 @@ const CHECKIN_LAB = {
   capacity: 10,
   requiresApproval: false,
   approvalLevels: 1,
-  settings: { minSlotMinutes: 1, maxSlotMinutes: 60, bookingHorizonDays: 2 },
+  settings: { description: FIXTURE_NOTE, minSlotMinutes: 1, maxSlotMinutes: 60, bookingHorizonDays: 2 },
 };
 
 async function signInThroughUi(page: Page, login: { email: string; password: string }) {

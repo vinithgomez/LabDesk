@@ -6,6 +6,7 @@
  *
  * Demo data only. Rows are inserted directly (the API refuses past starts)
  * and carry idempotency keys "seed:history:...", so they're recognisable.
+ * Each booking gets a realistic purpose and attendee count for its resource.
  *
  * Deterministic per (resource, day): the random stream is seeded from the
  * resource name and the date, so re-running the seed — even on a later day —
@@ -32,7 +33,14 @@ export interface HistoryResource {
   profile: UsageProfile;
   /** Who books it, with relative weights. */
   bookers: { userId: string; weight: number }[];
+  /** What bookings here are for; one is picked per booking. */
+  purposes: readonly string[];
+  /** How many people a booking brings (inclusive). */
+  attendees: { min: number; max: number };
 }
+
+/** The purpose the first version of the seed gave every history booking; a reseed replaces it. */
+const LEGACY_PURPOSE = "Demo history";
 
 export interface UsageProfile {
   /** Chance a free half-hour at peak time starts a booking (0 = never used). */
@@ -88,6 +96,8 @@ export async function seedHistory(
 
 interface PlannedBooking {
   key: string;
+  purpose: string;
+  attendeeCount: number;
   userId: string;
   start: Date;
   end: Date;
@@ -136,7 +146,8 @@ function outcome(
   b: { userId: string; start: Date; end: Date },
   noShowRate: number,
 ): PlannedBooking {
-  const base = { ...b, key: `seed:history:${resource.id}:${b.start.toISOString()}`, expired: false, checkin: null };
+  const key = `seed:history:${resource.id}:${b.start.toISOString()}`;
+  const base = { ...b, key, ...details(resource, key), expired: false, checkin: null };
   const roll = rand();
   if (resource.requiresApproval && roll < 0.05) return { ...base, status: "rejected" };
   if (resource.requiresApproval && roll < 0.08) return { ...base, status: "rejected", expired: true };
@@ -171,13 +182,19 @@ async function insertHistoricBooking(prisma: PrismaClient, r: HistoryResource, b
       VALUES (
         ${r.id}::uuid, ${b.userId}::uuid,
         tstzrange(${b.start.toISOString()}::timestamptz, ${b.end.toISOString()}::timestamptz, '[)'),
-        ${b.status}::booking_status, 'Demo history', 1, ${b.key},
+        ${b.status}::booking_status, ${b.purpose}, ${b.attendeeCount}, ${b.key},
         ${new Date(b.start.getTime() - 2 * DAY_MS).toISOString()}::timestamptz, ${b.end.toISOString()}::timestamptz
       )
       ON CONFLICT DO NOTHING
       RETURNING id::text AS id`;
     const bookingId = rows[0]?.id;
-    if (!bookingId) return false;
+    if (!bookingId) {
+      // Already seeded. A database seeded before purposes existed gets them now.
+      await tx.$executeRaw`
+        UPDATE bookings SET purpose = ${b.purpose}, attendee_count = ${b.attendeeCount}
+        WHERE idempotency_key = ${b.key} AND resource_id = ${r.id}::uuid AND purpose = ${LEGACY_PURPOSE}`;
+      return false;
+    }
 
     if (b.expired) {
       await tx.$executeRaw`
@@ -200,6 +217,17 @@ async function insertHistoricBooking(prisma: PrismaClient, r: HistoryResource, b
     }
     return true;
   });
+}
+
+/**
+ * A booking's purpose and attendee count. Drawn from their own random stream
+ * (seeded by the booking's key), so they don't shift the schedule that
+ * planDay draws: the same bookings land at the same times as before.
+ */
+function details(resource: HistoryResource, key: string): { purpose: string; attendeeCount: number } {
+  const rand = rng(`${key}|details`);
+  const { min, max } = resource.attendees;
+  return { purpose: pick(rand, resource.purposes), attendeeCount: min + Math.floor(rand() * (max - min + 1)) };
 }
 
 // ---- small deterministic helpers ------------------------------------------

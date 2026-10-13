@@ -7,6 +7,10 @@
  *
  * Idempotent: safe to run repeatedly. Existing users keep their passwords.
  * Run with `npm run db:seed`.
+ *
+ * Demo data only, meant to be seen: realistic names, resources and booking
+ * purposes, and every password from the environment. Test fixtures (the
+ * Playwright suite's "E2E" resources and students) are never created here.
  */
 import "dotenv/config";
 import { z } from "zod";
@@ -24,8 +28,8 @@ const env = z
     DATABASE_URL: z.string().min(1),
     SEED_ADMIN_EMAIL: z.email(),
     SEED_ADMIN_PASSWORD: z.string().min(8).max(72),
-    // Shared password for the non-admin demo accounts.
-    SEED_USER_PASSWORD: z.string().min(8).max(72).default("Password123!"),
+    // Shared password for the non-admin demo accounts. Required: no password lives in code.
+    SEED_USER_PASSWORD: z.string().min(8).max(72),
     BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),
   })
   .parse(process.env);
@@ -56,6 +60,9 @@ interface SeedResource {
   owners: { email: string; level: 1 | 2 }[];
   /** Demo history: how busy it is, and who books it. */
   usage: UsageProfile & { bookers: "students" | "staff" };
+  /** Demo history: what bookings are for, and how many people come. */
+  purposes: string[];
+  attendees: { min: number; max: number };
   /** How long ago it came into service (the idle ranking needs 4 weeks). */
   ageDays: number;
 }
@@ -98,6 +105,7 @@ const RESOURCES: SeedResource[] = [
     owners: [{ email: "ravi.kumar@college.edu", level: 1 }],
     hours: { start: "09:00", end: "17:00", days: WEEKDAYS },
     usage: { intensity: 0, lengths: [60], bookers: "students" }, ageDays: 70,
+    purposes: ["Digital logic lab experiment", "Microprocessor bus debugging"], attendees: { min: 1, max: 2 },
   },
   {
     dept: "CSE", name: "3D Printer P-2", type: "equipment", location: "Block A, Maker Space", capacity: 1,
@@ -106,6 +114,8 @@ const RESOURCES: SeedResource[] = [
     owners: [{ email: "ravi.kumar@college.edu", level: 1 }],
     hours: { start: "09:00", end: "18:00", days: WEEKDAYS },
     usage: { intensity: 0.3, lengths: [120, 180, 240], bookers: "students" }, ageDays: 14,
+    purposes: ["Mini-project enclosure print", "Final-year project parts", "Robotics club prototype", "Drone frame print"],
+    attendees: { min: 1, max: 2 },
   },
   {
     dept: "CSE", name: "Systems Lab L-201", type: "lab", location: "Block A, 2nd floor", capacity: 40,
@@ -114,6 +124,16 @@ const RESOURCES: SeedResource[] = [
     owners: [{ email: "ravi.kumar@college.edu", level: 1 }],
     hours: { start: "08:00", end: "20:00", days: [1, 2, 3, 4, 5, 6] },
     usage: { intensity: 0.6, lengths: [60, 120, 180], bookers: "students" }, ageDays: 70,
+    purposes: [
+      "Lab record work",
+      "DBMS lab practice",
+      "Operating systems lab assignment",
+      "Compiler design lab",
+      "Mini-project demo",
+      "Coding club practice session",
+      "Placement aptitude practice",
+    ],
+    attendees: { min: 4, max: 36 },
   },
   {
     dept: "CSE", name: "GPU Workstation #1", type: "equipment", location: "Block A, Room 214", capacity: 1,
@@ -125,6 +145,8 @@ const RESOURCES: SeedResource[] = [
     ],
     hours: { start: "08:00", end: "22:00", days: [0, 1, 2, 3, 4, 5, 6] },
     usage: { intensity: 0.5, lengths: [120, 180, 240], bookers: "students" }, ageDays: 70,
+    purposes: ["Model training run", "Fine-tuning experiment", "Dataset preprocessing", "Final-year project experiments"],
+    attendees: { min: 1, max: 1 },
   },
   {
     dept: "CSE", name: "Seminar Room S-1", type: "room", location: "Block A, ground floor", capacity: 60,
@@ -133,6 +155,8 @@ const RESOURCES: SeedResource[] = [
     owners: [{ email: "anita.rao@college.edu", level: 1 }],
     hours: { start: "09:00", end: "17:00", days: WEEKDAYS },
     usage: { intensity: 0.22, lengths: [60, 90, 120], bookers: "staff" }, ageDays: 70,
+    purposes: ["Department seminar", "Guest lecture", "Project review panel", "Faculty meeting", "Workshop on research writing"],
+    attendees: { min: 15, max: 60 },
   },
   {
     dept: "ECE", name: "VLSI Design Lab", type: "lab", location: "Block C, 1st floor", capacity: 30,
@@ -141,6 +165,8 @@ const RESOURCES: SeedResource[] = [
     owners: [{ email: "suresh.menon@college.edu", level: 1 }],
     hours: { start: "08:00", end: "18:00", days: WEEKDAYS },
     usage: { intensity: 0.42, lengths: [60, 120, 180], bookers: "students" }, ageDays: 70,
+    purposes: ["Verilog simulation lab", "FPGA synthesis run", "VLSI lab record work", "Mini-project demo"],
+    attendees: { min: 2, max: 28 },
   },
   {
     dept: "ECE", name: "Digital Storage Oscilloscope", type: "equipment", location: "Block C, Room 105", capacity: 1,
@@ -149,6 +175,7 @@ const RESOURCES: SeedResource[] = [
     owners: [{ email: "suresh.menon@college.edu", level: 1 }],
     hours: { start: "08:00", end: "18:00", days: WEEKDAYS },
     usage: { intensity: 0.03, lengths: [30, 60], bookers: "students" }, ageDays: 70,
+    purposes: ["Signal measurement for lab record", "Filter response readings"], attendees: { min: 1, max: 2 },
   },
   {
     dept: "ECE", name: "Embedded Systems Lab", type: "lab", location: "Block C, 2nd floor", capacity: 36,
@@ -160,6 +187,8 @@ const RESOURCES: SeedResource[] = [
     ],
     hours: { start: "09:00", end: "18:00", days: WEEKDAYS },
     usage: { intensity: 0.2, lengths: [60, 120], bookers: "students" }, ageDays: 70,
+    purposes: ["Microcontroller lab", "IoT mini-project", "Sensor interfacing practice", "Embedded systems lab record work"],
+    attendees: { min: 2, max: 30 },
   },
 ];
 
@@ -225,7 +254,7 @@ async function main(): Promise<void> {
 
     const now = new Date();
     const history: HistoryResource[] = [];
-    for (const { dept, owners, hours, usage, ageDays, ...rest } of RESOURCES) {
+    for (const { dept, owners, hours, usage, ageDays, purposes, attendees, ...rest } of RESOURCES) {
       const departmentId = deptId(dept);
       const since = new Date(now.getTime() - ageDays * DAY_MS);
       const fields = {
@@ -271,6 +300,8 @@ async function main(): Promise<void> {
         ownerId: ownerRows[0]?.userId ?? null,
         profile: usage,
         bookers: bookerPool.map((u, i) => ({ userId: idOf(userIds, u.email), weight: 1 + (i % 3) * 0.5 })),
+        purposes,
+        attendees: { min: attendees.min, max: Math.min(attendees.max, Math.max(rest.capacity, 1)) },
       });
     }
 

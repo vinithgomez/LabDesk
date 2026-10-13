@@ -80,8 +80,10 @@ Requires Docker.
 
 The API container applies migrations and seeds on start (both idempotent):
 two departments, demo staff and students, eight resources and 8 weeks of
-booking history for the analytics dashboard. Faculty, lab in-charges and
-admins see `/analytics`; `/scan` is the QR scanner.
+booking history for the analytics dashboard, with realistic purposes ("Lab
+record work", "Model training run", "Department seminar", …). Faculty, lab
+in-charges and admins see `/analytics`; `/scan` is the QR scanner. The seed
+reads every password from `server/.env`; none is built into the code.
 
 ## Local development
 
@@ -102,6 +104,38 @@ admins see `/analytics`; `/scan` is the QR scanner.
 Print a resource's check-in code with `GET /api/resources/:id/qr` (owner or
 admin). The code is static: it stays valid for the resource's lifetime, as long
 as `PUBLIC_APP_URL` doesn't change.
+
+## Reset demo data
+
+> **Warning: this deletes all local data** — every user, booking, resource and
+> setting in your local LabDesk database, including anything you created by
+> hand. It cannot be undone. It never touches a database other than the one in
+> `server/.env`.
+
+The seed only adds what is missing, so it doesn't remove data you created
+while trying the app, nor the fixtures the Playwright suite creates ("E2E Lab",
+"E2E Check-in Lab" and "E2E Student …" accounts: the seed never creates
+these). To get back to exactly the seeded demo:
+
+- **Local development** (Postgres from `docker compose … up -d postgres redis`),
+  from the repository root:
+
+  ```bash
+  cd server && npx prisma migrate reset --force --skip-seed && npm run db:seed
+  ```
+
+  `migrate reset` drops and recreates the database in `DATABASE_URL` and
+  re-applies every migration; `db:seed` then seeds it.
+
+- **The whole app in Docker** (the quick start): removing the `pgdata` volume
+  wipes the database, and the API seeds again on the next start:
+
+  ```bash
+  docker compose --env-file server/.env down -v && docker compose --env-file server/.env up --build
+  ```
+
+Running the Playwright suite against your local stack adds its fixtures
+again; reset afterwards if you want a clean demo.
 
 ## Tests
 
