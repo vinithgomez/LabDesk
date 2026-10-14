@@ -35,3 +35,6 @@ Thumbs.db
 .vscode/
 .idea/
 .claude/
+
+# Throwaway visual-review screenshots (never committed)
+.visual-review/

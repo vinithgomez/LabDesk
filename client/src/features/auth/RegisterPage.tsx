@@ -1,14 +1,13 @@
+import { RotateCw } from "lucide-react";
 import { useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
+import { Button, Field, Input, Select } from "../../components/ui";
 import { describeApiError } from "../../lib/api-errors";
 import { useDepartments } from "../resources/use-resources";
+import { AuthLayout, FormError, PasswordInput } from "./AuthLayout";
 import { departmentError } from "./register-form";
 import { safeNext } from "./redirect";
-import { EyeIcon } from "./SignInForm";
 import { useSession } from "./use-session";
-
-const field =
-  "min-h-11 rounded-lg border border-slate-700 bg-slate-900 px-3 text-base text-white placeholder:text-slate-500 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-400";
 
 /**
  * Account creation. Every new account is a student (CLAUDE.md §2b); an
@@ -22,7 +21,6 @@ export default function RegisterPage() {
   const departments = useDepartments();
 
   const [form, setForm] = useState({ fullName: "", email: "", password: "", departmentId: "", rollNo: "" });
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [departmentProblem, setDepartmentProblem] = useState<string | null>(null);
@@ -58,108 +56,84 @@ export default function RegisterPage() {
   };
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-3">
-      <h1 className="text-2xl font-bold text-white">Create your LabDesk account</h1>
-      <p className="text-sm text-slate-400">New accounts are student accounts; staff are promoted by an admin.</p>
-      <label className="flex flex-col gap-1 text-sm text-slate-300">
-        Full name
-        <input className={field} autoComplete="name" required maxLength={120} value={form.fullName} onChange={set("fullName")} />
-      </label>
-      <label className="flex flex-col gap-1 text-sm text-slate-300">
-        College email
-        <input className={field} type="email" autoComplete="email" required value={form.email} onChange={set("email")} />
-      </label>
-      <label className="flex flex-col gap-1 text-sm text-slate-300">
-        Password <span className="text-xs text-slate-500">(8–72 characters)</span>
-        <div className="relative">
-          <input
-            id="register-password"
-            className={`${field} w-full pr-12`}
-            type={showPassword ? "text" : "password"}
-            autoComplete="new-password"
-            required
-            minLength={8}
-            maxLength={72}
-            value={form.password}
-            onChange={set("password")}
-          />
-          <button
-            type="button"
-            onClick={() => setShowPassword((shown) => !shown)}
-            aria-pressed={showPassword}
-            aria-controls="register-password"
-            aria-label={showPassword ? "Hide password" : "Show password"}
-            className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-slate-400 hover:text-slate-200 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-400"
-          >
-            <EyeIcon crossedOut={showPassword} />
-          </button>
+    <AuthLayout>
+      <form onSubmit={submit} className="flex flex-col gap-5">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-h2 font-semibold text-ink">Create your LabDesk account</h1>
+          <p className="text-body text-ink-muted">New accounts are student accounts; an admin promotes staff.</p>
         </div>
-      </label>
-      <label className="flex flex-col gap-1 text-sm text-slate-300">
-        Department
-        <select
-          ref={departmentRef}
-          className={field}
-          value={form.departmentId}
-          onChange={(e) => {
-            set("departmentId")(e);
-            setDepartmentProblem(null);
-          }}
-          disabled={!departments.data}
-          aria-invalid={departmentProblem !== null}
-          aria-describedby={departmentProblem ? "department-problem" : undefined}
+        <Field label="Full name">
+          {(control) => <Input {...control} autoComplete="name" required maxLength={120} value={form.fullName} onChange={set("fullName")} />}
+        </Field>
+        <Field label="College email">
+          {(control) => <Input {...control} type="email" autoComplete="email" required value={form.email} onChange={set("email")} />}
+        </Field>
+        <Field label="Password" id="register-password" helper="8 to 72 characters.">
+          {(control) => (
+            <PasswordInput
+              {...control}
+              autoComplete="new-password"
+              required
+              minLength={8}
+              maxLength={72}
+              value={form.password}
+              onChange={set("password")}
+            />
+          )}
+        </Field>
+        <div className="flex flex-col gap-2">
+          <Field label="Department" error={departmentProblem} errorId="department-problem">
+            {(control) => (
+              <Select
+                {...control}
+                ref={departmentRef}
+                value={form.departmentId}
+                onChange={(e) => {
+                  set("departmentId")(e);
+                  setDepartmentProblem(null);
+                }}
+                disabled={!departments.data}
+              >
+                <option value="" disabled>
+                  {departments.isPending ? "Loading departments…" : "Choose your department"}
+                </option>
+                {departments.data?.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name} ({d.code})
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          {departments.isError && (
+            <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-2 text-body text-danger-text">
+              <span>The department list didn&apos;t load. {describeApiError(departments.error)}</span>
+              <Button icon={RotateCw} onClick={() => void departments.refetch()} loading={departments.isFetching}>
+                Retry
+              </Button>
+            </div>
+          )}
+        </div>
+        <Field
+          label={
+            <>
+              Roll number <span className="font-normal text-ink-muted">(optional)</span>
+            </>
+          }
         >
-          <option value="" disabled>
-            {departments.isPending ? "Loading departments…" : "Choose your department"}
-          </option>
-          {departments.data?.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name} ({d.code})
-            </option>
-          ))}
-        </select>
-      </label>
-      {departmentProblem && (
-        <p id="department-problem" role="alert" className="-mt-2 text-sm text-rose-300">
-          {departmentProblem}
+          {(control) => <Input {...control} maxLength={32} value={form.rollNo} onChange={set("rollNo")} />}
+        </Field>
+        <FormError>{error}</FormError>
+        <Button type="submit" variant="primary" loading={busy} className="w-full">
+          Create account
+        </Button>
+        <p className="text-body text-ink-muted">
+          Already have an account?{" "}
+          <Link to={`/login?next=${encodeURIComponent(next)}`} className="font-medium text-cobalt underline-offset-4 hover:underline">
+            Sign in
+          </Link>
         </p>
-      )}
-      {departments.isError && (
-        <div role="alert" className="-mt-1 flex flex-wrap items-center gap-2 text-sm text-rose-300">
-          <span>The department list didn't load. {describeApiError(departments.error)}</span>
-          <button
-            type="button"
-            onClick={() => void departments.refetch()}
-            disabled={departments.isFetching}
-            className="min-h-9 rounded-lg border border-slate-600 px-3 text-sm font-medium text-slate-200 disabled:opacity-60 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-400"
-          >
-            {departments.isFetching ? "Retrying…" : "Retry"}
-          </button>
-        </div>
-      )}
-      <label className="flex flex-col gap-1 text-sm text-slate-300">
-        Roll number <span className="text-xs text-slate-500">(optional)</span>
-        <input className={field} maxLength={32} value={form.rollNo} onChange={set("rollNo")} />
-      </label>
-      <p role="alert" className="min-h-5 text-sm text-rose-300">
-        {error}
-      </p>
-      <button
-        type="submit"
-        disabled={busy}
-        className="min-h-12 rounded-xl bg-indigo-600 text-base font-semibold text-white disabled:opacity-60 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300"
-      >
-        {busy ? "Creating account…" : "Create account"}
-      </button>
-      <p className="text-center text-sm text-slate-400">
-        Already have an account?{" "}
-        <Link
-          to={`/login?next=${encodeURIComponent(next)}`}
-          className="font-medium text-indigo-300 underline-offset-4 hover:underline focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-400"
-        >
-          Sign in
-        </Link>
-      </p>
-    </form>
+      </form>
+    </AuthLayout>
   );
 }

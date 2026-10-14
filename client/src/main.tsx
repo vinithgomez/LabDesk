@@ -1,8 +1,16 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
-import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation } from "react-router-dom";
-import { AppHeader } from "./features/auth/AppHeader";
+import { createBrowserRouter, Navigate, Outlet, RouterProvider } from "react-router-dom";
+// Self-hosted fonts (DESIGN.md §3): no CDN, so the app works offline. Weights 400, 500, 600 only.
+import "@fontsource/ibm-plex-sans/400.css";
+import "@fontsource/ibm-plex-sans/500.css";
+import "@fontsource/ibm-plex-sans/600.css";
+import "@fontsource/ibm-plex-sans-condensed/400.css";
+import "@fontsource/ibm-plex-sans-condensed/500.css";
+import "@fontsource/ibm-plex-sans-condensed/600.css";
+import { AppShell } from "./components/shell/AppShell";
+import { ToastProvider } from "./components/ui";
 import { RequireSession } from "./features/auth/RequireSession";
 import "./index.css";
 
@@ -25,22 +33,14 @@ const AdminUsersTab = lazy(() => import("./features/admin/UsersTab"));
 
 const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
 
-/** Paths laid out for a phone: signing in, and scanning at the resource. */
-const PHONE_WIDTH = ["/login", "/register", "/scan", "/checkin"];
-
-/** Every screen: the header, then the page. Desk screens use the full width. */
+/** Every screen: the app shell (rail, top bar, tab bar), then the page. */
 function Layout() {
-  const { pathname } = useLocation();
-  const wide = !PHONE_WIDTH.includes(pathname);
   return (
-    <main
-      className={`mx-auto flex min-h-dvh w-full flex-col px-4 pt-3 pb-[max(2rem,env(safe-area-inset-bottom))] ${wide ? "max-w-7xl" : "max-w-md"}`}
-    >
-      <AppHeader />
-      <Suspense fallback={<p className="text-xl text-slate-300">Loading…</p>}>
+    <AppShell>
+      <Suspense fallback={<p className="text-body text-ink-muted">Loading…</p>}>
         <Outlet />
       </Suspense>
-    </main>
+    </AppShell>
   );
 }
 
@@ -80,7 +80,9 @@ if (!root) throw new Error("#root missing");
 createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <ToastProvider>
+        <RouterProvider router={router} />
+      </ToastProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

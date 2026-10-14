@@ -1,7 +1,220 @@
 @import "tailwindcss";
 
-html {
+/*
+ * Design tokens (DESIGN.md §3). Values mirror src/styles/tokens.ts, which the
+ * contrast test checks against this file. Components use the Tailwind names
+ * mapped below (bg-surface, text-ink, border-line …), never raw hex.
+ */
+:root {
+  color-scheme: light;
+  --bench: #F3F4F1;
+  --surface: #FFFFFF;
+  --sunken: #EAECE7;
+  --line: #D9DCD4;
+  --line-strong: #848880;
+  --ink: #16201C;
+  --ink-muted: #55605A;
+  --ink-faint: #626C66;
+  --cobalt: #1F47C4;
+  --cobalt-strong: #1A3BA3;
+  --cobalt-tint: #E3EAFB;
+  --primary: #1F47C4;
+  --primary-strong: #1A3BA3;
+  --on-cobalt: #FFFFFF;
+  --danger: #B42318;
+  --danger-text: #B42318;
+  --st-pending-bg: #FBEFD2;
+  --st-pending-fg: #6B4200;
+  --st-pending-border: #E4B95A;
+  --st-approved-bg: #E3EAFB;
+  --st-approved-fg: #17338F;
+  --st-approved-border: #A9BBF2;
+  --st-checked-in-bg: #DCF1E3;
+  --st-checked-in-fg: #14532D;
+  --st-checked-in-border: #8CCBA2;
+  --st-completed-bg: #EAECE7;
+  --st-completed-fg: #55605A;
+  --st-completed-border: #D9DCD4;
+  --st-cancelled-bg: #F7DDDA;
+  --st-cancelled-fg: #8A1C12;
+  --st-cancelled-border: #E8A59E;
+  --st-expired-bg: #EAECE7;
+  --st-expired-fg: #626C66;
+  --st-expired-border: #D9DCD4;
+  /* Only things that float get a shadow (dialogs, menus, toasts, sheets). */
+  --float-shadow: 0 12px 32px rgb(22 32 28 / 0.16), 0 2px 6px rgb(22 32 28 / 0.08);
+}
+
+:root[data-theme="dark"] {
   color-scheme: dark;
+  --bench: #0F1512;
+  --surface: #161D19;
+  --sunken: #0B100D;
+  --line: #27302B;
+  --line-strong: #606964;
+  --ink: #E8ECE7;
+  --ink-muted: #A3ADA6;
+  --ink-faint: #8A958E;
+  --cobalt: #7C9BFF;
+  --cobalt-strong: #9DB4FF;
+  --cobalt-tint: #1B2748;
+  --primary: #3F66E8;
+  --primary-strong: #3457D6;
+  --on-cobalt: #FFFFFF;
+  --danger: #B93A2E;
+  --danger-text: #F7B2A9;
+  --st-pending-bg: #2E2207;
+  --st-pending-fg: #F7CD7E;
+  --st-pending-border: #7A5A1C;
+  --st-approved-bg: #1B2748;
+  --st-approved-fg: #C3D0FF;
+  --st-approved-border: #3D5299;
+  --st-checked-in-bg: #0F2A1B;
+  --st-checked-in-fg: #9FE3B6;
+  --st-checked-in-border: #2F6B47;
+  --st-completed-bg: #0B100D;
+  --st-completed-fg: #A3ADA6;
+  --st-completed-border: #27302B;
+  --st-cancelled-bg: #33130F;
+  --st-cancelled-fg: #F7B2A9;
+  --st-cancelled-border: #7A3229;
+  --st-expired-bg: #0B100D;
+  --st-expired-fg: #8A958E;
+  --st-expired-border: #27302B;
+  --float-shadow: 0 12px 32px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.4);
+}
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme inline {
+  --color-bench: var(--bench);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-cobalt: var(--cobalt);
+  --color-cobalt-strong: var(--cobalt-strong);
+  --color-cobalt-tint: var(--cobalt-tint);
+  --color-primary: var(--primary);
+  --color-primary-strong: var(--primary-strong);
+  --color-on-cobalt: var(--on-cobalt);
+  --color-danger: var(--danger);
+  --color-danger-text: var(--danger-text);
+  --color-st-pending-bg: var(--st-pending-bg);
+  --color-st-pending-fg: var(--st-pending-fg);
+  --color-st-pending-border: var(--st-pending-border);
+  --color-st-approved-bg: var(--st-approved-bg);
+  --color-st-approved-fg: var(--st-approved-fg);
+  --color-st-approved-border: var(--st-approved-border);
+  --color-st-checked-in-bg: var(--st-checked-in-bg);
+  --color-st-checked-in-fg: var(--st-checked-in-fg);
+  --color-st-checked-in-border: var(--st-checked-in-border);
+  --color-st-completed-bg: var(--st-completed-bg);
+  --color-st-completed-fg: var(--st-completed-fg);
+  --color-st-completed-border: var(--st-completed-border);
+  --color-st-cancelled-bg: var(--st-cancelled-bg);
+  --color-st-cancelled-fg: var(--st-cancelled-fg);
+  --color-st-cancelled-border: var(--st-cancelled-border);
+  --color-st-expired-bg: var(--st-expired-bg);
+  --color-st-expired-fg: var(--st-expired-fg);
+  --color-st-expired-border: var(--st-expired-border);
+
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-condensed: "IBM Plex Sans Condensed", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+
+  /* Type scale (px): 12, 13, 15 body, 17, 20, 24, 32. */
+  --text-meta: 12px;
+  --text-meta--line-height: 1.4;
+  --text-small: 13px;
+  --text-small--line-height: 1.45;
+  --text-body: 15px;
+  --text-body--line-height: 1.5;
+  --text-lead: 17px;
+  --text-lead--line-height: 1.45;
+  --text-h3: 20px;
+  --text-h3--line-height: 1.2;
+  --text-h2: 24px;
+  --text-h2--line-height: 1.2;
+  --text-h1: 32px;
+  --text-h1--line-height: 1.2;
+
+  /* Radius by role: chips/blocks 4, controls 6, panels/dialogs/sheets 10. */
+  --radius-chip: 4px;
+  --radius-control: 6px;
+  --radius-panel: 10px;
+
+  --shadow-float: var(--float-shadow);
+}
+
+@layer base {
+  html {
+    background: var(--bench);
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    margin: 0;
+    background: var(--bench);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    /* Mobile body 16 (and fields 16, so iOS doesn't zoom); 15 from tablet up. */
+    font-size: 16px;
+    line-height: 1.5;
+  }
+  @media (min-width: 768px) {
+    body {
+      font-size: 15px;
+    }
+  }
+  h1,
+  h2,
+  h3 {
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+  }
+  /* One visible focus treatment everywhere: a 2px cobalt ring, 2px offset.
+     The resting outline colour is cobalt too, so transition-colors (which
+     includes outline-color) never fades the ring in from the text colour. */
+  :where(*) {
+    outline-color: var(--cobalt);
+  }
+  :focus-visible {
+    outline: 2px solid var(--cobalt);
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  /* Busy and maintenance time: diagonal hatch of --line-strong on --sunken. */
+  .hatch {
+    background-color: var(--sunken);
+    background-image: repeating-linear-gradient(135deg, var(--line-strong) 0 1px, transparent 1px 6px);
+  }
+}
+
+/*
+ * Screens not yet redesigned (Phase A restyles only Login, Register and
+ * Resources) keep their original dark styling inside this scope, so they
+ * stay legible in either theme until their turn.
+ */
+.legacy-screen {
+  color-scheme: dark;
+  background: var(--color-slate-950);
+  color: var(--color-slate-200);
+  border-radius: var(--radius-panel);
+  padding: 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* html5-qrcode injects a <video>; make it fill the viewfinder. */

@@ -3,12 +3,30 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#4f46e5" />
+    <!-- Page background per theme (--bench). The script below picks one before first paint. -->
+    <meta name="theme-color" content="#F3F4F1" />
+    <script>
+      // Same rule as src/lib/theme.ts: a stored choice wins, else the system
+      // preference, else light. Runs before first paint so there is no flash.
+      (function () {
+        var theme = null;
+        try {
+          var stored = window.localStorage.getItem("labdesk-theme");
+          if (stored === "light" || stored === "dark") theme = stored;
+        } catch (e) {}
+        if (!theme) {
+          theme = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        document.documentElement.setAttribute("data-theme", theme);
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", theme === "dark" ? "#0F1512" : "#F3F4F1");
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <title>LabDesk</title>
   </head>
-  <body class="bg-slate-950">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

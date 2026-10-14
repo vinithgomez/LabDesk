@@ -10,7 +10,7 @@ export function RequireSession({ children }: { children: ReactNode }) {
 
   if (status === "checking") {
     return (
-      <p role="status" aria-live="polite" className="flex flex-1 items-center justify-center text-xl text-slate-300">
+      <p role="status" aria-live="polite" className="flex min-h-dvh items-center justify-center text-body text-ink-muted">
         Loading…
       </p>
     );

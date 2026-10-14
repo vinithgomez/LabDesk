@@ -12,7 +12,7 @@ export default function LoginPage() {
 
   if (status === "signedIn") return <Navigate to={next} replace />;
   if (status === "checking") {
-    return <p className="flex flex-1 items-center justify-center text-xl text-slate-300">Loading…</p>;
+    return <p className="flex min-h-dvh items-center justify-center text-body text-ink-muted">Loading…</p>;
   }
   return (
     <SignInForm

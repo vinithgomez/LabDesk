@@ -9,6 +9,9 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
     restoreMocks: true,
+    // The contrast test reads index.css as text (?raw) to check it matches tokens.ts;
+    // Vitest stubs CSS to an empty string unless a file is opted in.
+    css: { include: [/index.css/] },
     // Run as if the machine were in New York: every IST calculation must
     // come from explicit time-zone code, never from the machine's own zone.
     env: { TZ: "America/New_York" },

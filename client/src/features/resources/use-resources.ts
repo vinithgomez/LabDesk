@@ -1,6 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { apiRequest } from "../../lib/api";
+import type { Availability } from "../bookings/types";
+import { istDayEnd, istDayKey, istDayStart } from "../calendar/grid";
 
 export type ResourceType = "lab" | "room" | "equipment";
 export const RESOURCE_TYPES: readonly ResourceType[] = ["lab", "room", "equipment"];
@@ -78,4 +80,27 @@ export function useDebounced<T>(value: T, ms: number): T {
     return () => clearTimeout(t);
   }, [value, ms]);
   return settled;
+}
+
+/**
+ * Today's busy intervals (IST) for each listed resource, keyed by id, for
+ * the at-a-glance column. One availability request per resource.
+ */
+export function useTodayAvailability(resourceIds: readonly string[], now: Date) {
+  const day = istDayKey(now);
+  const from = istDayStart(day).toISOString();
+  const to = istDayEnd(day).toISOString();
+  const results = useQueries({
+    queries: resourceIds.map((id) => ({
+      queryKey: ["availability", id, "today", day],
+      queryFn: () => apiRequest<Availability>(`/api/resources/${id}/availability?from=${from}&to=${to}`, { method: "GET" }),
+      staleTime: 60_000,
+    })),
+  });
+  const byId = new Map<string, Availability["busy"]>();
+  results.forEach((r, i) => {
+    const id = resourceIds[i];
+    if (id && r.data) byId.set(id, r.data.busy);
+  });
+  return byId;
 }
