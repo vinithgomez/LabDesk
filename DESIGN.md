@@ -29,28 +29,36 @@ Define as CSS variables on `:root` (light) and `:root[data-theme="dark"]` (dark)
 | `--surface` | `#FFFFFF` | panels, dialogs, inputs |
 | `--sunken` | `#EAECE7` | table headers, hover rows, disabled fields |
 | `--line` | `#D9DCD4` | borders, dividers |
-| `--line-strong` | `#B9BEB3` | input borders, hour lines in the calendar |
+| `--line-strong` | `#848880` | input borders (3:1 against the surface); not used for calendar grid lines |
+| `--grid-hour` | `#CBCFC5` | calendar hour lines (decorative, softer than `--line-strong`) |
+| `--grid-half` | `#E1E4DC` | calendar half-hour lines (softer still) |
 | `--ink` | `#16201C` | body text and headings |
 | `--ink-muted` | `#55605A` | secondary text |
-| `--ink-faint` | `#6F7A73` | placeholders, disabled text |
+| `--ink-faint` | `#626C66` | placeholders, disabled text |
 | `--cobalt` | `#1F47C4` | primary buttons, links, my bookings, focus ring |
 | `--cobalt-strong` | `#1A3BA3` | primary hover and pressed |
 | `--cobalt-tint` | `#E3EAFB` | selected rows, today column, selection preview |
 | `--on-cobalt` | `#FFFFFF` | text on cobalt |
+| `--busy` | `#EAECE7` | someone else's booking on the calendar: fill |
+| `--busy-edge` | `#B4B9AF` | its 1px edge |
+| `--busy-hatch` | `#848880` | the lines of its hatch |
+| `--scrim` | `rgb(9 18 14 / 0.45)` | the dim layer behind dialogs, sheets and drawers (a deep green-black) |
 
 Status (background / text / border): pending `#FBEFD2 / #6B4200 / #E4B95A`; approved `--cobalt-tint / #17338F / #A9BBF2`; checked in `#DCF1E3 / #14532D / #8CCBA2`; completed `--sunken / --ink-muted / --line`; cancelled, rejected and no-show `#F7DDDA / #8A1C12 / #E8A59E`; expired `--sunken / --ink-faint / --line`; maintenance uses a diagonal hatch of `--line-strong` on `--sunken`.
 
 ### Colour, dark (a real design, not an inversion)
 
-`--bench #0F1512`, `--surface #161D19`, `--sunken #0B100D`, `--line #27302B`, `--line-strong #3A453F`, `--ink #E8ECE7`, `--ink-muted #A3ADA6`, `--ink-faint #8A958E`, `--cobalt #7C9BFF` (text, links, ring), primary button fill `#3F66E8` with white text, `--cobalt-tint #1B2748`. Status colours get dark variants with the same hue and at least the same contrast.
+`--bench #0F1512`, `--surface #161D19`, `--sunken #0B100D`, `--line #27302B`, `--line-strong #606964`, `--grid-hour #353F39`, `--grid-half #252D28`, `--ink #E8ECE7`, `--ink-muted #A3ADA6`, `--ink-faint #8A958E`, `--cobalt #7C9BFF` (text, links, ring), primary button fill `#3F66E8` with white text, `--cobalt-tint #1B2748`, `--busy #28312C`, `--busy-edge #727C76`, `--busy-hatch #727C76`, `--scrim rgb(0 0 0 / 0.6)`. Status colours get dark variants with the same hue and at least the same contrast.
+
+In dark, a "Busy" block (someone else's booking) is **lighter than the surface**, never darker, so it reads as a thing rather than a hole; its edge is at least 3:1 against the surface and its hatch stays visible. The scrim is always a darkening layer in both themes, never built from the text colour.
 
 ### Contrast rules
 
-Body and small text at least 4.5:1, large text and UI borders at least 3:1, in both themes. Add a unit test (`tokens.contrast.test.ts`) that computes WCAG ratios for every text-on-background pair listed above and fails below the thresholds.
+Body and small text at least 4.5:1, large text and UI borders at least 3:1, in both themes. Add a unit test (`tokens.contrast.test.ts`) that computes WCAG ratios for every text-on-background pair listed above and fails below the thresholds. The calendar grid lines are decorative (no minimum ratio) but must stay visible on the surface and softer than `--line-strong`; the Busy block's label, fill, hatch and dark-theme edge (3:1) and the heatmap ramp are tested as well.
 
 ### Heatmap and charts
 
-Single hue, sequential: from `--cobalt-tint` to `--cobalt` in light, from `--surface` to `#7C9BFF` in dark. Zero cells stay visible as an outlined empty cell, so the grid is readable. No rainbow, no gradient washes as decoration.
+Single hue, sequential: from `--cobalt-tint` to `--cobalt` in light, from `--surface` to `#7C9BFF` in dark, in five steps `--heat-1` to `--heat-5` (light `#E3EAFB #B2C1ED #8198E0 #5070D2 #1F47C4`; dark `#2A3647 #3F4F75 #5369A3 #6882D1 #7C9BFF`, starting just above the surface so the lightest step is visible). Zero cells stay visible as an outlined empty cell (a `--line` outline), so the grid is readable. No rainbow, no gradient washes as decoration.
 
 ### Type
 
@@ -79,7 +87,7 @@ No entrance animations and no hover animation on cards. State changes use 120 to
 - **Page structure:** `PageHeader` (title, one plain line of description, actions on the right), then content. Content max width 1200 px, except the calendar, which uses the full width.
 - **Wide screens:** every page has a max content width, centred in the space beside the rail. Split layouts (sign-in, register) cap and centre each side's content inside its own half (about 520 px for the left side, 380 px for a form), and the left side's logo and footer align to that same column. Nothing stretches to the full viewport width except the calendar. Check every screen at 1920 px as well as the sizes in §8.
 - **Logo:** a 3 by 3 grid of small squares with one filled in cobalt (a booked slot). Used as favicon, PWA icons and the wordmark prefix.
-- **Theme:** light by default. A toggle in the user menu switches light and dark and remembers the choice (`localStorage` in try/catch, with a tiny inline script in `index.html` that sets `data-theme` before first paint so there is no flash). Also set `theme-color` for both themes and update the PWA manifest colours.
+- **Theme:** light by default, including on a first visit when the system prefers dark (the system's colour-scheme preference is not followed). A toggle in the user menu switches light and dark and remembers the choice; a stored choice always wins (`localStorage` in try/catch, with a tiny inline script in `index.html` that sets `data-theme` before first paint so there is no flash). Also set `theme-color` for both themes and update the PWA manifest colours.
 
 ## 5. Components (build once in `client/src/components/ui`, reuse everywhere)
 
@@ -102,11 +110,11 @@ Icons: `lucide-react`, one stroke width everywhere. Icons support text; they do 
 ## 7. The week calendar
 
 - Time axis in Plex Sans Condensed with ruler ticks: a long tick at each hour, a short tick at each half hour.
-- Hour lines in `--line-strong`, half-hour lines in `--line`, like graph paper. Outside business hours: a slightly darker `--sunken` band, not hidden.
+- Hour lines in `--grid-hour`, half-hour lines in `--grid-half`, like graph paper: their own tokens, softer than `--line-strong`, which is kept for input borders. Outside business hours: a slightly darker `--sunken` band, not hidden.
 - Today's column in `--cobalt-tint`. A "now" line in `--cobalt` with a small notch on the axis.
 - Blocks, radius 4:
   - my booking: solid `--cobalt`, white text, time range and purpose.
-  - someone else's booking: `--sunken` with a left-edge diagonal hatch; show only what the app already shows today.
+  - someone else's booking: `--busy` with a `--busy-edge` border and a left-edge diagonal hatch in `--busy-hatch` (lighter than the surface in dark); show only what the app already shows today.
   - pending: amber with a dashed border and the word "Pending".
   - maintenance: hatched, labelled "Maintenance".
 - While dragging: a dashed `--cobalt` outline with a live label "11:00 to 12:00, 1 h". The drag still stops at a busy slot (existing behaviour).
@@ -118,6 +126,6 @@ Icons: `lucide-react`, one stroke width everywhere. Icons support text; they do 
 
 - Visible keyboard focus everywhere, logical tab order, dialogs trap focus and return it.
 - All status conveyed by text and icon as well as colour.
-- `prefers-reduced-motion` and `prefers-color-scheme` respected (the stored theme choice wins over the system setting).
+- `prefers-reduced-motion` respected. The theme does not follow `prefers-color-scheme`: with nothing stored it is light, and a stored choice always wins.
 - No horizontal page scroll at 360 px wide. Test at 360, 390, 768, 1024, 1440, in both themes.
 - Do not change any behaviour, route, API call, error code or test intent while restyling.
