@@ -3,7 +3,9 @@
  * bootstrap admin from SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD, a handful of
  * faculty, lab in-charges, students and resources in BOTH departments, and
  * (Phase 6, demo only) HISTORY_WEEKS of past bookings and check-ins so the
- * analytics dashboard has something to show — see seed-history.ts.
+ * analytics dashboard has something to show — see seed-history.ts — and
+ * upcoming bookings, a maintenance window and a weekly series so the
+ * calendar, approvals inbox and series page look alive — see seed-upcoming.ts.
  *
  * Idempotent: safe to run repeatedly. Existing users keep their passwords.
  * Run with `npm run db:seed`.
@@ -18,6 +20,7 @@ import { createPasswordHasher } from "../auth/password.js";
 import type { ResourceType, UserRole } from "../domain/types.js";
 import { createPrismaClient, type PrismaClient } from "./prisma.js";
 import { seedHistory, type HistoryResource, type UsageProfile } from "./seed-history.js";
+import { seedUpcoming, type UpcomingResource, type UpcomingSeed, type WeeklyAnchor } from "./seed-upcoming.js";
 
 /** Weeks of demo booking history (CLAUDE.md §12: 8 weeks). */
 const HISTORY_WEEKS = 8;
@@ -95,6 +98,47 @@ const NO_SHOW_HABITS: Record<string, number> = {
   "kabir.das@college.edu": 0.35,
   "rahul.verma@college.edu": 0.22,
   "vikram.singh@college.edu": 0.15,
+};
+
+/**
+ * Upcoming demo data (seed-upcoming.ts): a few bookings that recur on a
+ * weekday, so whichever day the seed runs, the next 12 days include them.
+ * Arjun Nair has his own approved bookings (and the series below); Dr.
+ * Anita Rao, level-1 approver of the GPU workstation and the seminar room,
+ * has requests waiting in her inbox; and two bookings show approval done.
+ */
+interface SeedAnchor extends Omit<WeeklyAnchor, "resourceId" | "userId"> {
+  resource: string;
+  booker: string;
+}
+
+const ANCHORS: SeedAnchor[] = [
+  // Arjun Nair's own week.
+  { resource: "Systems Lab L-201", weekday: 1, start: "10:00", minutes: 120, booker: "arjun.nair@college.edu", purpose: "Mini-project demo", attendeeCount: 4, status: "approved" },
+  { resource: "3D Printer P-2", weekday: 3, start: "14:00", minutes: 120, booker: "arjun.nair@college.edu", purpose: "Final-year project parts", attendeeCount: 1, status: "approved" },
+  { resource: "Systems Lab L-201", weekday: 5, start: "09:00", minutes: 120, booker: "arjun.nair@college.edu", purpose: "Lab record work", attendeeCount: 1, status: "approved" },
+  // Waiting for Dr. Anita Rao (level 1).
+  { resource: "Seminar Room S-1", weekday: 3, start: "11:00", minutes: 90, booker: "ravi.kumar@college.edu", purpose: "Project review panel", attendeeCount: 25, status: "pending" },
+  { resource: "Seminar Room S-1", weekday: 5, start: "14:00", minutes: 60, booker: "ravi.kumar@college.edu", purpose: "Workshop on research writing", attendeeCount: 40, status: "pending" },
+  { resource: "GPU Workstation #1", weekday: 2, start: "10:00", minutes: 180, booker: "priya.shah@college.edu", purpose: "Model training run", attendeeCount: 1, status: "pending" },
+  { resource: "GPU Workstation #1", weekday: 4, start: "15:00", minutes: 180, booker: "kabir.das@college.edu", purpose: "Fine-tuning experiment", attendeeCount: 1, status: "pending" },
+  // Approved at every level by the resource's owners.
+  { resource: "GPU Workstation #1", weekday: 1, start: "14:00", minutes: 180, booker: "neha.gupta@college.edu", purpose: "Dataset preprocessing", attendeeCount: 1, status: "approved" },
+  { resource: "Embedded Systems Lab", weekday: 3, start: "10:00", minutes: 120, booker: "divya.pillai@college.edu", purpose: "IoT mini-project", attendeeCount: 6, status: "approved" },
+];
+
+/** Upcoming: one maintenance window, scheduled by the resource's owner. */
+const MAINTENANCE = { resource: "3D Printer P-2", startsAt: "10:00", hours: 3, reason: "Quarterly calibration", by: "ravi.kumar@college.edu" };
+
+/** Upcoming: Arjun Nair's weekly lab, Tuesdays and Thursdays 14:00 to 16:00. */
+const SERIES = {
+  resource: "Systems Lab L-201",
+  booker: "arjun.nair@college.edu",
+  weekdays: [2, 4],
+  start: "14:00",
+  minutes: 120,
+  purpose: "Compiler design lab",
+  attendeeCount: 30,
 };
 
 const RESOURCES: SeedResource[] = [
@@ -254,6 +298,7 @@ async function main(): Promise<void> {
 
     const now = new Date();
     const history: HistoryResource[] = [];
+    const upcoming: UpcomingResource[] = [];
     for (const { dept, owners, hours, usage, ageDays, purposes, attendees, ...rest } of RESOURCES) {
       const departmentId = deptId(dept);
       const since = new Date(now.getTime() - ageDays * DAY_MS);
@@ -303,15 +348,67 @@ async function main(): Promise<void> {
         purposes,
         attendees: { min: attendees.min, max: Math.min(attendees.max, Math.max(rest.capacity, 1)) },
       });
+      upcoming.push({
+        id: resourceId,
+        name: rest.name,
+        requiresApproval: rest.requiresApproval,
+        capacity: rest.capacity,
+        minSlotMinutes: rest.minSlotMinutes,
+        maxSlotMinutes: rest.maxSlotMinutes,
+        bookingHorizonDays: rest.bookingHorizonDays,
+        businessHoursStart: hours.start,
+        businessHoursEnd: hours.end,
+        businessDays: hours.days,
+        owners: ownerRows.map((o) => ({ userId: o.userId, approvalLevel: o.approvalLevel })),
+        intensity: usage.intensity,
+        lengths: usage.lengths,
+        bookers: bookerPool.map((u, i) => ({ userId: idOf(userIds, u.email), weight: 1 + (i % 3) * 0.5 })),
+        purposes,
+        attendees,
+      });
     }
 
     const habits = new Map(Object.entries(NO_SHOW_HABITS).map(([email, rate]) => [idOf(userIds, email), rate]));
     const seeded = await seedHistory(prisma, history, habits, { now, weeks: HISTORY_WEEKS });
 
+    const resourceIdOf = (name: string): string => {
+      const r = upcoming.find((x) => x.name === name);
+      if (!r) throw new Error(`Resource ${name} was not seeded`);
+      return r.id;
+    };
+    const plan: UpcomingSeed = {
+      resources: upcoming,
+      anchors: ANCHORS.map(({ resource, booker, ...a }) => ({ ...a, resourceId: resourceIdOf(resource), userId: idOf(userIds, booker) })),
+      maintenance: {
+        resourceId: resourceIdOf(MAINTENANCE.resource),
+        startsAt: MAINTENANCE.startsAt,
+        hours: MAINTENANCE.hours,
+        reason: MAINTENANCE.reason,
+        createdBy: idOf(userIds, MAINTENANCE.by),
+      },
+      series: {
+        resourceId: resourceIdOf(SERIES.resource),
+        userId: idOf(userIds, SERIES.booker),
+        weekdays: SERIES.weekdays,
+        start: SERIES.start,
+        minutes: SERIES.minutes,
+        purpose: SERIES.purpose,
+        attendeeCount: SERIES.attendeeCount,
+      },
+    };
+    const ahead = await seedUpcoming(prisma, plan, now);
+    const skipped = Object.entries(ahead.skipped).map(([code, n]) => `${n} ${code}`).join(", ");
+
     console.log(
       `Seeded ${DEPARTMENTS.length} departments, admin ${env.SEED_ADMIN_EMAIL}, ` +
         `${USERS.length} demo users, ${RESOURCES.length} resources, ` +
         `${seeded.bookings} new history bookings (${seeded.checkins} check-ins) over ${HISTORY_WEEKS} weeks.`,
+    );
+    console.log(
+      `Upcoming: ${ahead.created} new bookings (${ahead.approved} approved, ${ahead.pending} pending), ` +
+        `${ahead.existing} already there${skipped ? `, skipped ${skipped}` : ""}; ` +
+        `maintenance window ${ahead.maintenance}; series ${ahead.series.state} ` +
+        `(${ahead.series.booked} dates booked, ${ahead.series.skipped} skipped this run).`,
     );
   } finally {
     await prisma.$disconnect();
