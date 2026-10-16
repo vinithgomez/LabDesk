@@ -9,7 +9,7 @@ import { CSS_VAR, STATUS_VAR, THEMES, type StatusName, type Theme, type ThemeNam
  * values in tokens.ts, so what is tested is what ships.
  */
 
-function luminance(hex: string): number {
+export function luminance(hex: string): number {
   const [r, g, b] = [1, 3, 5].map((i) => {
     const c = parseInt(hex.slice(i, i + 2), 16) / 255;
     return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
@@ -72,6 +72,89 @@ describe.each(["light", "dark"] as ThemeName[])("%s theme contrast", (name) => {
   });
 });
 
+/**
+ * The calendar's graph-paper lines are decorative, so no WCAG minimum
+ * applies; they must still be visible on the grid's surface, stay softer
+ * than an input border (--line-strong), and hour lines must read stronger
+ * than half-hour lines.
+ */
+const VISIBLE = 1.15;
+
+describe.each(["light", "dark"] as ThemeName[])("%s calendar grid lines (decorative)", (name) => {
+  const t = THEMES[name];
+
+  it.each([
+    ["hour", t.gridHour],
+    ["half-hour", t.gridHalf],
+  ])("%s line is visible on the surface", (_label, line) => {
+    expect(contrast(line, t.surface)).toBeGreaterThanOrEqual(VISIBLE);
+  });
+
+  it("hour lines also show on the closed-hours band (sunken)", () => {
+    expect(contrast(t.gridHour, t.sunken)).toBeGreaterThanOrEqual(VISIBLE);
+  });
+
+  it.each([
+    ["hour", t.gridHour],
+    ["half-hour", t.gridHalf],
+  ])("%s line is softer than an input border", (_label, line) => {
+    expect(contrast(line, t.surface)).toBeLessThan(contrast(t.lineStrong, t.surface));
+  });
+
+  it("hour lines are stronger than half-hour lines", () => {
+    expect(contrast(t.gridHour, t.surface)).toBeGreaterThan(contrast(t.gridHalf, t.surface));
+  });
+});
+
+describe.each(["light", "dark"] as ThemeName[])("%s busy blocks on the calendar", (name) => {
+  const t = THEMES[name];
+
+  it("label text (ink-muted) is readable on the busy fill", () => {
+    expect(contrast(t.inkMuted, t.busy)).toBeGreaterThanOrEqual(TEXT);
+  });
+
+  it("the fill stands apart from the surface", () => {
+    expect(contrast(t.busy, t.surface)).toBeGreaterThanOrEqual(VISIBLE);
+  });
+
+  it("the hatch is visible on the fill", () => {
+    expect(contrast(t.busyHatch, t.busy)).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("dark busy blocks are a thing, not a hole", () => {
+  const t = THEMES.dark;
+  it("their fill is lighter than the surface", () => {
+    expect(luminance(t.busy)).toBeGreaterThan(luminance(t.surface));
+  });
+  it("their edge is at least 3:1 against the surface", () => {
+    expect(contrast(t.busyEdge, t.surface)).toBeGreaterThanOrEqual(UI);
+  });
+});
+
+describe.each(["light", "dark"] as ThemeName[])("%s heatmap ramp", (name) => {
+  const t = THEMES[name];
+
+  it("starts from the spec's light end and ends at its strong end", () => {
+    expect(t.heat[0]).toBe(name === "light" ? t.cobaltTint : "#2A3647");
+    expect(t.heat[4]).toBe(name === "light" ? t.cobalt : "#7C9BFF");
+  });
+
+  it("gets stronger at every step, against the surface it sits on", () => {
+    const ratios = t.heat.map((c) => contrast(c, t.surface));
+    ratios.slice(1).forEach((r, i) => expect(r).toBeGreaterThan(ratios[i] ?? 0));
+  });
+
+  it("its lightest step is visible, and its strongest stands out as UI", () => {
+    expect(contrast(t.heat[0], t.surface)).toBeGreaterThanOrEqual(VISIBLE);
+    expect(contrast(t.heat[4], t.surface)).toBeGreaterThanOrEqual(UI);
+  });
+
+  it("an empty cell's outline (--line) is visible on the surface", () => {
+    expect(contrast(t.line, t.surface)).toBeGreaterThanOrEqual(VISIBLE);
+  });
+});
+
 describe("dark status colours", () => {
   it.each(STATUSES)("%s keeps at least the light theme's contrast", (s) => {
     const light = THEMES.light.status[s];
@@ -108,6 +191,7 @@ describe("index.css matches tokens.ts", () => {
     for (const [key, cssVar] of Object.entries(CSS_VAR)) {
       expect(vars.get(cssVar), `${name} ${cssVar}`).toBe(t[key as keyof typeof CSS_VAR].toUpperCase());
     }
+    t.heat.forEach((c, i) => expect(vars.get(`--heat-${i + 1}`), `${name} --heat-${i + 1}`).toBe(c.toUpperCase()));
     for (const s of STATUSES) {
       for (const part of ["bg", "fg", "border"] as const) {
         expect(vars.get(`--st-${STATUS_VAR[s]}-${part}`), `${name} ${s} ${part}`).toBe(t.status[s][part].toUpperCase());

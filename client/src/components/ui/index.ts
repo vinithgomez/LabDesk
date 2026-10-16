@@ -17,6 +17,6 @@ export {
   type BadgeTone,
   type StatusKind,
 } from "./display";
-export { ConfirmDialog, Dialog, Sheet, ToastProvider, Tooltip, useToast } from "./overlays";
+export { ConfirmDialog, Dialog, Drawer, Sheet, ToastProvider, Tooltip, useToast } from "./overlays";
 export { Table, Tabs, type Column, type TabItem } from "./structure";
 export { cn, ICON_STROKE } from "./util";

@@ -67,7 +67,7 @@ describe("maintenance windows", () => {
     await user.type(screen.getByLabelText("Reason (bookers see this)"), "Rewiring");
     await user.click(screen.getByRole("button", { name: "Review…" }));
     expect(screen.getByText("It must end in the future.")).toBeInTheDocument();
-    expect(screen.queryByRole("group", { name: "Confirm maintenance window" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Create this maintenance window?" })).not.toBeInTheDocument();
     expect(posts()).toHaveLength(0);
   });
 
@@ -81,7 +81,7 @@ describe("maintenance windows", () => {
     await user.type(screen.getByLabelText("Reason (bookers see this)"), "Rewiring");
     await user.click(screen.getByRole("button", { name: "Review…" }));
 
-    const confirm = screen.getByRole("group", { name: "Confirm maintenance window" });
+    const confirm = screen.getByRole("dialog", { name: "Create this maintenance window?" });
     expect(
       await within(confirm).findByText(
         "Every booking on Systems Lab that overlaps Mon 5 Oct, 10:00–12:00 (pending, approved or in progress) will be cancelled automatically, and its booker will see your reason. 1 booking overlaps it right now.",

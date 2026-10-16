@@ -1,9 +1,8 @@
+import { Copy, RefreshCw } from "lucide-react";
 import { useState } from "react";
+import { Button, ConfirmDialog, Input } from "../../components/ui";
 import { describeApiError } from "../../lib/api-errors";
 import { useCalendarFeed } from "./use-bookings";
-
-const button =
-  "min-h-8 rounded-md px-2.5 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-50";
 
 /** The private ICS link: copy it, or replace it after a confirm that says the old one stops working. */
 export function CalendarFeed() {
@@ -21,79 +20,75 @@ export function CalendarFeed() {
     }
   };
 
+  const closeConfirm = () => {
+    setConfirming(false);
+    regenerate.reset();
+  };
+
   return (
-    <section aria-labelledby="feed-heading" className="flex flex-col gap-2 rounded-lg border border-slate-800 p-3">
-      <h2 id="feed-heading" className="text-sm font-semibold text-white">
-        Calendar feed
-      </h2>
-      <p className="text-xs text-slate-400">
-        Subscribe to this link in Google Calendar, Outlook or Apple Calendar to see your approved bookings. Anyone with the link can
-        read them, so keep it private.
-      </p>
+    <section aria-labelledby="feed-heading" className="flex max-w-3xl flex-col gap-3 border-t border-line pt-6">
+      <div>
+        <h2 id="feed-heading" className="text-h3 font-semibold text-ink">
+          Calendar feed
+        </h2>
+        <p className="mt-1 max-w-[72ch] text-body text-ink-muted">
+          Subscribe to this link in Google Calendar, Outlook or Apple Calendar to see your approved bookings. Anyone with the link can
+          read them, so keep it private.
+        </p>
+      </div>
       {feed.isError ? (
-        <p role="alert" className="text-sm text-rose-300">
+        <p role="alert" className="text-body text-danger-text">
           {describeApiError(feed.error)}
         </p>
       ) : !feed.data ? (
-        <p role="status" className="text-sm text-slate-400">
+        <p role="status" className="text-body text-ink-muted">
           Loading…
         </p>
       ) : (
         <>
-          <div className="flex flex-wrap gap-2">
-            <input
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input
               readOnly
               aria-label="Calendar feed URL"
               value={feed.data.url}
               onFocus={(e) => e.currentTarget.select()}
-              className="min-h-8 min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-2 font-mono text-xs text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+              className="min-w-0 flex-1 text-ink-muted"
             />
-            <button type="button" onClick={() => void copy(feed.data.url)} className={`${button} bg-indigo-600 text-white`}>
-              Copy
-            </button>
-            {!confirming && (
-              <button type="button" onClick={() => setConfirming(true)} className={`${button} border border-slate-600 text-slate-200`}>
+            <div className="flex gap-2">
+              <Button icon={Copy} onClick={() => void copy(feed.data.url)} className="max-sm:flex-1">
+                Copy
+              </Button>
+              <Button variant="quiet" icon={RefreshCw} onClick={() => setConfirming(true)} className="max-sm:flex-1">
                 Regenerate…
-              </button>
-            )}
+              </Button>
+            </div>
           </div>
-          <p aria-live="polite" className="min-h-4 text-xs text-slate-400">
+          <p aria-live="polite" className="min-h-5 text-small text-ink-muted">
             {note}
           </p>
-          {confirming && (
-            <div role="group" aria-label="Confirm new link" className="flex flex-col gap-2 rounded-md border border-amber-400/40 bg-amber-400/10 p-2">
-              <p className="text-sm text-amber-100">
-                Create a new link? The current link stops working immediately, everywhere it is subscribed; you'll need to add the new
-                one to your calendar app.
+          <ConfirmDialog
+            open={confirming}
+            onClose={closeConfirm}
+            title="Create a new link?"
+            description="The current link stops working immediately, everywhere it is subscribed; you'll need to add the new one to your calendar app."
+            confirmLabel="Create new link"
+            cancelLabel="Keep current link"
+            busy={regenerate.isPending}
+            onConfirm={() =>
+              regenerate.mutate(undefined, {
+                onSuccess: () => {
+                  closeConfirm();
+                  setNote("New link created. The old link no longer works; update your calendar app.");
+                },
+              })
+            }
+          >
+            {regenerate.isError && (
+              <p role="alert" className="text-body text-danger-text">
+                {describeApiError(regenerate.error)}
               </p>
-              {regenerate.isError && (
-                <p role="alert" className="text-sm text-rose-300">
-                  {describeApiError(regenerate.error)}
-                </p>
-              )}
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  autoFocus
-                  disabled={regenerate.isPending}
-                  onClick={() =>
-                    regenerate.mutate(undefined, {
-                      onSuccess: () => {
-                        setConfirming(false);
-                        setNote("New link created. The old link no longer works; update your calendar app.");
-                      },
-                    })
-                  }
-                  className={`${button} bg-amber-500 text-slate-950`}
-                >
-                  {regenerate.isPending ? "Creating…" : "Create new link"}
-                </button>
-                <button type="button" disabled={regenerate.isPending} onClick={() => setConfirming(false)} className={`${button} text-slate-300`}>
-                  Keep current link
-                </button>
-              </div>
-            </div>
-          )}
+            )}
+          </ConfirmDialog>
         </>
       )}
     </section>

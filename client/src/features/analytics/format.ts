@@ -23,6 +23,7 @@ export function barWidth(ratio: number | null): string {
 
 const DATE = new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" });
 
+/** The period in words: "18 Aug to 14 Oct". */
 export function windowLabel(w: { from: string; to: string }): string {
-  return `${DATE.format(new Date(w.from))} – ${DATE.format(new Date(w.to))}`;
+  return `${DATE.format(new Date(w.from))} to ${DATE.format(new Date(w.to))}`;
 }

@@ -2,10 +2,10 @@ import { useCallback, useSyncExternalStore } from "react";
 import { THEMES, type ThemeName } from "../styles/tokens";
 
 /**
- * Light or dark (DESIGN.md §4). A stored choice wins; without one the
- * system preference decides, and light is the default. index.html runs the
- * same rule inline before first paint, so there is no flash; this module
- * keeps it in step afterwards.
+ * Light or dark (DESIGN.md §4). A stored choice wins; without one the app
+ * is light, whatever the system prefers. index.html runs the same rule
+ * inline before first paint, so there is no flash; this module keeps it in
+ * step afterwards.
  */
 export const THEME_STORAGE_KEY = "labdesk-theme";
 
@@ -34,9 +34,9 @@ export function storeTheme(theme: ThemeName, storage: Pick<Storage, "setItem"> |
   }
 }
 
-/** The theme to show: the stored choice, else the system preference, else light. */
-export function resolveTheme(stored: ThemeName | null, systemPrefersDark: boolean): ThemeName {
-  return stored ?? (systemPrefersDark ? "dark" : "light");
+/** The theme to show: the stored choice, else light. The system's dark preference is deliberately not followed. */
+export function resolveTheme(stored: ThemeName | null): ThemeName {
+  return stored ?? "light";
 }
 
 /** Puts the theme on <html data-theme> and the browser's theme-color. */

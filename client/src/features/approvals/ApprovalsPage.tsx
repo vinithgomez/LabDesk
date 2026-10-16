@@ -1,21 +1,24 @@
+import { Check, ClipboardCheck, Clock3, TimerOff } from "lucide-react";
 import { useState } from "react";
+import { Badge, Button, Checkbox, cn, EmptyState, Field, PageHeader, Skeleton, Textarea } from "../../components/ui";
 import { describeApiError } from "../../lib/api-errors";
 import { useNow } from "../../lib/use-now";
 import { isStaff, useMe } from "../auth/use-me";
-import { formatDateTime, formatPeriod } from "../calendar/format";
+import { formatDate, formatDateTime, formatPeriod, formatTime } from "../calendar/format";
 import { availableActions, rejectionCommentError, whyNotDecidable, type InboxItem } from "./model";
 import { useApprovalActions, useInbox } from "./use-approvals";
 
-const button =
-  "min-h-8 rounded-md px-3 text-sm font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:opacity-50";
-
-/** §11 approvals inbox: approve or reject in place, oldest start first. */
+/** §11 approvals inbox: a queue, oldest start first; approve or reject in place. */
 export default function ApprovalsPage() {
   const me = useMe();
   // Wait for the role, so the inbox is only asked for by staff.
-  if (!me.data) return <p className="text-sm text-slate-400">Loading…</p>;
+  if (!me.data) return <p className="text-body text-ink-muted">Loading…</p>;
   if (!isStaff(me.data)) {
-    return <p className="text-sm text-slate-300">The approvals inbox is for faculty, lab in-charges and admins.</p>;
+    return (
+      <EmptyState icon={ClipboardCheck} title="Approvals are for staff">
+        The approvals inbox is for faculty, lab in-charges and admins.
+      </EmptyState>
+    );
   }
   return <Inbox meId={me.data.id} />;
 }
@@ -25,42 +28,59 @@ function Inbox({ meId }: { meId: string }) {
   const inbox = useInbox(onlyMine);
   const actions = useApprovalActions(meId);
   const now = useNow(30_000);
+  const count = inbox.data?.length;
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <h1 className="text-xl font-bold text-white">
-          Approvals{inbox.data && <span className="ml-2 text-sm font-normal text-slate-400">{inbox.data.length}</span>}
-        </h1>
-        <label className="flex items-center gap-2 text-sm text-slate-300">
-          <input
-            type="checkbox"
-            checked={!onlyMine}
-            onChange={(e) => setOnlyMine(!e.target.checked)}
-            className="size-4 accent-indigo-500"
-          />
-          Also show pending bookings I can't decide
-        </label>
-      </div>
+    <div className="flex flex-col">
+      <PageHeader
+        title="Approvals"
+        description={
+          count === undefined
+            ? "Booking requests waiting for a decision, soonest first."
+            : count === 0
+              ? "Nothing is waiting right now."
+              : `${count} request${count === 1 ? "" : "s"} waiting, soonest first. Approve to confirm the time; reject with a reason the booker will see.`
+        }
+        actions={
+          <Checkbox label="Also show pending bookings I can't decide" checked={!onlyMine} onChange={(e) => setOnlyMine(!e.target.checked)} />
+        }
+      />
 
+      {/* The one status region on this page: each decision's result. */}
       <p
         role="status"
         aria-live="polite"
-        className={`min-h-5 text-sm ${actions.notice?.tone === "error" ? "rounded-md bg-rose-600/20 p-2 text-rose-200" : actions.notice ? "rounded-md bg-emerald-600/15 p-2 text-emerald-200" : ""}`}
+        className={cn(
+          "text-body",
+          actions.notice &&
+            (actions.notice.tone === "error"
+              ? "mb-4 rounded-control border border-st-cancelled-border bg-st-cancelled-bg px-3 py-2 text-st-cancelled-fg"
+              : "mb-4 rounded-control border border-st-checked-in-border bg-st-checked-in-bg px-3 py-2 text-st-checked-in-fg"),
+        )}
       >
         {actions.notice?.text}
       </p>
 
       {inbox.isError ? (
-        <p role="alert" className="rounded-md bg-rose-600/20 p-2 text-sm text-rose-200">
+        <p role="alert" className="text-body text-danger-text">
           {describeApiError(inbox.error)}
         </p>
       ) : inbox.isPending ? (
-        <p className="text-sm text-slate-400">Loading…</p>
+        <div aria-label="Loading the inbox" className="flex flex-col divide-y divide-line border-y border-line">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="grid gap-2 py-4 lg:grid-cols-[10rem_minmax(0,1fr)_14rem]">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-4 w-64 max-w-full" />
+              <Skeleton className="h-9 w-40 max-lg:hidden" />
+            </div>
+          ))}
+        </div>
       ) : inbox.data.length === 0 ? (
-        <p className="text-sm text-slate-400">{onlyMine ? "Nothing waiting for your decision." : "No pending bookings on your resources."}</p>
+        <EmptyState icon={Check} title={onlyMine ? "Nothing waiting for your decision." : "No pending bookings on your resources."}>
+          New requests on the resources you approve appear here as they come in.
+        </EmptyState>
       ) : (
-        <ul className="flex flex-col divide-y divide-slate-800 rounded-lg border border-slate-800" aria-label="Pending bookings">
+        <ul className="flex flex-col divide-y divide-line border-y border-line" aria-label="Pending bookings">
           {inbox.data.map((item) => (
             <InboxRow
               key={item.id}
@@ -77,6 +97,10 @@ function Inbox({ meId }: { meId: string }) {
   );
 }
 
+/**
+ * One request in the queue: when (left), who and what and why (middle), the
+ * decision (right). On a phone the same parts stack, with the actions last.
+ */
 function InboxRow({
   item,
   meId,
@@ -97,6 +121,8 @@ function InboxRow({
   const lapsedNow = allowed.reject && !allowed.approve;
   const blocked = whyNotDecidable(item, meId);
   const headingId = `inbox-${item.id}`;
+  const start = new Date(item.start);
+  const end = new Date(item.end);
 
   const submitReject = async () => {
     const problem = rejectionCommentError(comment);
@@ -106,29 +132,41 @@ function InboxRow({
   };
 
   return (
-    <li className="flex flex-col gap-1.5 px-3 py-2 sm:flex-row sm:items-start sm:justify-between" aria-labelledby={headingId}>
-      <div className="min-w-0 flex-1 text-sm">
+    <li className="grid gap-x-6 gap-y-3 py-4 lg:grid-cols-[10rem_minmax(0,1fr)_minmax(14rem,auto)] lg:items-start" aria-labelledby={headingId}>
+      {/* When: drawn as date over time; read once, as one phrase. */}
+      <div className="flex items-baseline gap-2 lg:flex-col lg:gap-0.5">
+        <span aria-hidden="true" className="text-body font-medium text-ink">
+          {formatDate(start)}
+        </span>
+        <span aria-hidden="true" className="font-condensed text-lead font-medium text-ink tabular-nums lg:text-h3">
+          {formatTime(start)}–{formatTime(end)}
+        </span>
+        <span className="sr-only">{formatPeriod(start, end)}</span>
+      </div>
+
+      {/* Who, what, why. */}
+      <div className="flex min-w-0 flex-col gap-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <h2 id={headingId} className="font-semibold text-white">
+          <h2 id={headingId} className="text-lead font-semibold text-ink">
             {item.resource.name}
           </h2>
-          <span className="tabular-nums text-slate-200">{formatPeriod(new Date(item.start), new Date(item.end))}</span>
           {item.stalled && (
-            <span className="rounded border border-amber-400/60 px-1.5 text-[11px] font-semibold text-amber-200">
+            <Badge tone="pending" icon={Clock3}>
               Stalled: level 2 silent 24 h+
-            </span>
+            </Badge>
           )}
-          {(item.lapsed || lapsedNow) && (
-            <span className="rounded bg-rose-500/20 px-1.5 text-[11px] font-semibold text-rose-200">Start time passed</span>
-          )}
+          {(item.lapsed || lapsedNow) && <Badge icon={TimerOff}>Start time passed</Badge>}
         </div>
-        <p className="text-slate-300">
-          <span className="font-medium text-slate-100">{item.booker.fullName}</span> · {item.attendeeCount}{" "}
-          {item.attendeeCount === 1 ? "person" : "people"} · awaiting level {item.awaitingLevel ?? "?"}
+        <p className="text-body text-ink-muted">
+          <span className="font-medium text-ink">{item.booker.fullName}</span>
+          {", "}
+          <span className="tabular-nums">
+            {item.attendeeCount} {item.attendeeCount === 1 ? "person" : "people"} · awaiting level {item.awaitingLevel ?? "?"}
+          </span>
         </p>
-        <p className="text-slate-300">{item.purpose || <span className="text-slate-500">No purpose given</span>}</p>
+        <p className="text-body text-ink">{item.purpose || <span className="text-ink-faint">No purpose given</span>}</p>
         {item.approvals.length > 0 && (
-          <ol className="mt-0.5 text-xs text-slate-400" aria-label="Approval trail">
+          <ol className="mt-1 flex flex-col gap-0.5 border-l-2 border-line pl-3 text-small text-ink-muted" aria-label="Approval trail">
             {item.approvals.map((a) => (
               <li key={`${a.level}-${a.approverId}`}>
                 Level {a.level} {a.decision} by {a.approverName}, {formatDateTime(new Date(a.decidedAt))}
@@ -139,53 +177,41 @@ function InboxRow({
         )}
       </div>
 
-      <div className="flex shrink-0 flex-col items-start gap-1.5 sm:items-end">
+      {/* The decision. */}
+      <div className="flex flex-col gap-2 lg:items-end">
         {blocked ? (
-          <p className="text-xs text-slate-400">{blocked}</p>
+          <p className="text-small text-ink-muted lg:max-w-60 lg:text-right">{blocked}</p>
         ) : rejecting ? (
-          <div className="flex w-full flex-col gap-1.5 sm:w-72">
-            <label className="flex flex-col gap-1 text-xs text-slate-400">
-              Reason for rejecting (the booker sees this)
-              <textarea
-                autoFocus
-                rows={2}
-                maxLength={1000}
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                aria-invalid={commentError !== null}
-                aria-describedby={commentError ? `${headingId}-err` : undefined}
-                className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-sm text-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
-              />
-            </label>
-            {commentError && (
-              <p id={`${headingId}-err`} className="text-xs text-rose-300">
-                {commentError}
-              </p>
-            )}
-            <div className="flex gap-2">
-              <button type="button" disabled={busy} onClick={() => void submitReject()} className={`${button} bg-rose-600 text-white`}>
+          <div className="flex w-full flex-col gap-2 lg:w-80">
+            <Field label="Reason for rejecting (the booker sees this)" error={commentError} errorId={`${headingId}-err`}>
+              {(control) => (
+                <Textarea {...control} autoFocus rows={2} maxLength={1000} value={comment} onChange={(e) => setComment(e.target.value)} />
+              )}
+            </Field>
+            <div className="flex flex-wrap gap-2 lg:justify-end">
+              <Button variant="danger" disabled={busy} onClick={() => void submitReject()}>
                 {busy ? "Rejecting…" : "Reject booking"}
-              </button>
-              <button type="button" disabled={busy} onClick={() => setRejecting(false)} className={`${button} text-slate-300`}>
+              </Button>
+              <Button variant="quiet" disabled={busy} onClick={() => setRejecting(false)}>
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
             {allowed.approve && (
-              <button type="button" disabled={busy} onClick={() => void onDecide("approve")} className={`${button} bg-emerald-600 text-white`}>
+              <Button variant="primary" disabled={busy} onClick={() => void onDecide("approve")} className="max-lg:flex-1">
                 {busy ? "Approving…" : "Approve"}
-              </button>
+              </Button>
             )}
             {allowed.reject && (
-              <button type="button" disabled={busy} onClick={() => setRejecting(true)} className={`${button} border border-rose-400/70 text-rose-200`}>
+              <Button disabled={busy} onClick={() => setRejecting(true)} className="max-lg:flex-1">
                 Reject…
-              </button>
+              </Button>
             )}
           </div>
         )}
-        {lapsedNow && !rejecting && <p className="text-xs text-slate-400">Its start has passed, so it can only be rejected.</p>}
+        {lapsedNow && !rejecting && <p className="text-small text-ink-muted lg:text-right">Its start has passed, so it can only be rejected.</p>}
       </div>
     </li>
   );

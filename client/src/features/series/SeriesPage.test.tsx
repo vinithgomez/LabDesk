@@ -82,7 +82,7 @@ describe("series detail", () => {
     const user = userEvent.setup();
     renderPage();
     await user.click(await screen.findByRole("button", { name: "Cancel series…" }));
-    const confirm = screen.getByRole("group", { name: "Confirm cancelling the series" });
+    const confirm = screen.getByRole("dialog", { name: "Cancel the series?" });
     expect(confirm).toHaveTextContent(CANCEL_SERIES_WARNING);
     expect(CANCEL_SERIES_WARNING).toMatch(/already started, are checked in, or are over are not touched/);
     expect(mocked.mock.calls.filter(([, init]) => init.method === "DELETE")).toHaveLength(0);

@@ -43,11 +43,16 @@ export function buildHeatmapGrid(cells: readonly HeatmapCell[]): HeatmapGrid {
   };
 }
 
-/** Background for a cell: slate when empty, indigo growing with booked time. */
-export function cellShade(bookedMinutes: number, max: number): string {
-  if (bookedMinutes <= 0 || max <= 0) return "rgb(30 41 59 / 0.6)";
-  const t = bookedMinutes / max;
-  return `rgb(99 102 241 / ${(0.18 + 0.82 * t).toFixed(3)})`;
+/** Steps on the heatmap's single-hue ramp (--heat-1 … --heat-5). */
+export const HEAT_STEPS = 5;
+
+/**
+ * A cell's step on the ramp: 0 for an empty cell (drawn as an outline), else
+ * 1 to HEAT_STEPS, growing with booked time relative to the busiest cell.
+ */
+export function heatStep(bookedMinutes: number, max: number): number {
+  if (bookedMinutes <= 0 || max <= 0) return 0;
+  return Math.min(HEAT_STEPS, Math.max(1, Math.ceil((bookedMinutes / max) * HEAT_STEPS)));
 }
 
 export const hourLabel = (h: number): string => `${String(h).padStart(2, "0")}:00`;

@@ -29,8 +29,6 @@ const ICON: Record<NavId, LucideIcon> = {
   admin: Settings2,
 };
 
-/** Screens restyled so far (DESIGN.md Phase A). Every other signed-in screen keeps its old look in a legacy scope. */
-const RESTYLED = (pathname: string) => pathname === "/resources";
 /** The calendar uses the full width; everything else stops at 1200px. */
 const FULL_WIDTH = (pathname: string) => /^\/resources\/[^/]+/.test(pathname);
 /** Scanning and check-in were laid out for a phone. */
@@ -54,11 +52,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </>
     );
   }
-  const content = RESTYLED(pathname) ? (
-    children
-  ) : (
-    <div className={cn("legacy-screen", PHONE_SCREEN(pathname) && "mx-auto max-w-md")}>{children}</div>
-  );
+  const content = PHONE_SCREEN(pathname) ? <div className="mx-auto flex w-full max-w-xl flex-col">{children}</div> : children;
   return (
     <div className="min-h-dvh md:flex">
       <SkipLink />

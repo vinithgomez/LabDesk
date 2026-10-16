@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from "react";
+import { Button, Checkbox, Field, Input, Select, Textarea } from "../../components/ui";
+import { describeApiError } from "../../lib/api-errors";
+import { WEEKDAYS } from "../calendar/format";
 import { RESOURCE_TYPES, type Department, type Resource, type ResourceType } from "../resources/use-resources";
 import { OwnersEditor } from "./OwnersEditor";
-import { describeApiError } from "../../lib/api-errors";
 import {
   emptyResourceForm,
   formFromResource,
@@ -12,11 +14,12 @@ import {
   type OwnerDraft,
   type ResourceFormValues,
 } from "./resource-form";
-import { WEEKDAYS } from "../calendar/format";
-import { Field, Notice, control, primary, secondary } from "./ui";
+import { AdminPanel, Notice } from "./ui";
 import { useSaveResource } from "./use-admin-resources";
 
-/** Create (original = null) or edit a resource, including its owners. */
+type TextKey = "name" | "location" | "capacity" | "minSlotMinutes" | "maxSlotMinutes" | "bookingHorizonDays";
+
+/** Create (original = null) or edit a resource, including its owners. Two columns from tablet up, one on a phone. */
 export function ResourceForm({
   original,
   departments,
@@ -49,100 +52,96 @@ export function ResourceForm({
     save.mutate({ original, values, owners }, { onSuccess: (saved) => onClose(saved) });
   };
 
-  const text = (key: "name" | "location" | "capacity" | "minSlotMinutes" | "maxSlotMinutes" | "bookingHorizonDays", label: string, hint?: string, inputMode?: "numeric") => (
-    <Field id={`rf-${key}`} label={label} hint={hint} error={errors[key]}>
-      {(a11y) => (
-        <input {...a11y} className={control} inputMode={inputMode} value={values[key]} onChange={(e) => set(key, e.target.value)} />
-      )}
+  const text = (key: TextKey, label: string, helper?: string, inputMode?: "numeric") => (
+    <Field id={`rf-${key}`} label={label} helper={helper} error={errors[key]}>
+      {(control) => <Input {...control} className={inputMode ? "tabular-nums" : undefined} inputMode={inputMode} value={values[key]} onChange={(e) => set(key, e.target.value)} />}
     </Field>
   );
 
+  const title = original ? `Edit ${original.name}` : "New resource";
   return (
-    <form onSubmit={submit} noValidate aria-label={original ? `Edit ${original.name}` : "New resource"} className="flex flex-col gap-3 rounded-lg border border-slate-700 bg-slate-900 p-3">
-      <h2 className="text-sm font-semibold text-white">{original ? `Edit ${original.name}` : "New resource"}</h2>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Field id="rf-departmentId" label="Department" error={errors.departmentId} hint={original ? "Can't be changed after creation." : undefined}>
-          {(a11y) => (
-            <select {...a11y} className={control} value={values.departmentId} disabled={original !== null} onChange={(e) => set("departmentId", e.target.value)}>
-              <option value="">Choose…</option>
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.code}
-                </option>
+    <form onSubmit={submit} noValidate aria-label={title}>
+      <AdminPanel title={title}>
+        <div className="grid gap-x-6 gap-y-4 md:grid-cols-2">
+          <Field id="rf-departmentId" label="Department" error={errors.departmentId} helper={original ? "Can't be changed after creation." : undefined}>
+            {(control) => (
+              <Select {...control} value={values.departmentId} disabled={original !== null} onChange={(e) => set("departmentId", e.target.value)}>
+                <option value="">Choose…</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.code}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          {text("name", "Name")}
+          <Field id="rf-type" label="Type">
+            {(control) => (
+              <Select {...control} value={values.type} onChange={(e) => set("type", e.target.value as ResourceType)}>
+                {RESOURCE_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t[0]?.toUpperCase()}
+                    {t.slice(1)}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          {text("location", "Location")}
+          {text("capacity", "Capacity (people)", "0 = no limit", "numeric")}
+          {text("bookingHorizonDays", "Bookable ahead (days)", undefined, "numeric")}
+          {text("minSlotMinutes", "Shortest booking (min)", undefined, "numeric")}
+          {text("maxSlotMinutes", "Longest booking (min)", undefined, "numeric")}
+          <Field id="rf-businessHoursStart" label="Opens (IST)" error={errors.businessHoursStart}>
+            {(control) => <Input {...control} type="time" value={values.businessHoursStart} onChange={(e) => set("businessHoursStart", e.target.value)} />}
+          </Field>
+          <Field id="rf-businessHoursEnd" label="Closes (IST)" error={errors.businessHoursEnd}>
+            {(control) => <Input {...control} type="time" value={values.businessHoursEnd} onChange={(e) => set("businessHoursEnd", e.target.value)} />}
+          </Field>
+          <fieldset className="flex flex-col gap-1.5 md:col-span-2">
+            <legend className="pb-1.5 text-small font-medium text-ink">Open days</legend>
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              {WEEKDAYS.map((d) => (
+                <label key={d.value} className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 text-body text-ink md:min-h-8">
+                  <input type="checkbox" className="size-4 accent-cobalt" checked={values.businessDays.includes(d.value)} onChange={() => toggleDay(d.value)} />
+                  <abbr title={d.long} className="no-underline">
+                    {d.short}
+                  </abbr>
+                </label>
               ))}
-            </select>
-          )}
-        </Field>
-        {text("name", "Name")}
-        <Field id="rf-type" label="Type">
-          {(a11y) => (
-            <select {...a11y} className={control} value={values.type} onChange={(e) => set("type", e.target.value as ResourceType)}>
-              {RESOURCE_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t[0]?.toUpperCase()}
-                  {t.slice(1)}
-                </option>
-              ))}
-            </select>
-          )}
-        </Field>
-        {text("location", "Location")}
-        {text("capacity", "Capacity (people)", "0 = no limit", "numeric")}
-        {text("minSlotMinutes", "Shortest booking (min)", undefined, "numeric")}
-        {text("maxSlotMinutes", "Longest booking (min)", undefined, "numeric")}
-        {text("bookingHorizonDays", "Bookable ahead (days)", undefined, "numeric")}
-        <Field id="rf-businessHoursStart" label="Opens (IST)" error={errors.businessHoursStart}>
-          {(a11y) => <input {...a11y} type="time" className={control} value={values.businessHoursStart} onChange={(e) => set("businessHoursStart", e.target.value)} />}
-        </Field>
-        <Field id="rf-businessHoursEnd" label="Closes (IST)" error={errors.businessHoursEnd}>
-          {(a11y) => <input {...a11y} type="time" className={control} value={values.businessHoursEnd} onChange={(e) => set("businessHoursEnd", e.target.value)} />}
-        </Field>
-        <fieldset className="col-span-2 flex flex-col gap-1">
-          <legend className="text-xs text-slate-400">Open days</legend>
-          <div className="flex flex-wrap gap-x-2 gap-y-1">
-            {WEEKDAYS.map((d) => (
-              <label key={d.value} className="flex items-center gap-1 text-sm text-slate-200">
-                <input type="checkbox" className="size-4 accent-indigo-500" checked={values.businessDays.includes(d.value)} onChange={() => toggleDay(d.value)} />
-                <abbr title={d.long} className="no-underline">
-                  {d.short}
-                </abbr>
-              </label>
-            ))}
+            </div>
+          </fieldset>
+          <Field id="rf-description" label="Description (optional)" error={errors.description} className="md:col-span-2">
+            {(control) => <Textarea {...control} rows={2} value={values.description} onChange={(e) => set("description", e.target.value)} />}
+          </Field>
+          <div className="flex flex-wrap items-end gap-x-6 gap-y-2 md:col-span-2">
+            <Checkbox label="Bookings need approval" checked={values.requiresApproval} onChange={(e) => set("requiresApproval", e.target.checked)} />
+            <Field id="rf-approvalLevels" label="Approval levels" className="w-32">
+              {(control) => (
+                <Select {...control} value={values.approvalLevels} onChange={(e) => set("approvalLevels", e.target.value === "2" ? 2 : 1)}>
+                  <option value={1}>1</option>
+                  <option value={2}>2</option>
+                </Select>
+              )}
+            </Field>
           </div>
-        </fieldset>
-      </div>
+        </div>
 
-      <Field id="rf-description" label="Description (optional)" error={errors.description}>
-        {(a11y) => <textarea {...a11y} rows={2} className={`${control} py-1`} value={values.description} onChange={(e) => set("description", e.target.value)} />}
-      </Field>
+        <OwnersEditor departmentId={values.departmentId} owners={owners} levels={values.approvalLevels} error={errors.owners} onChange={setOwners} />
 
-      <div className="flex flex-wrap items-center gap-4">
-        <label className="flex items-center gap-2 text-sm text-slate-200">
-          <input type="checkbox" className="size-4 accent-indigo-500" checked={values.requiresApproval} onChange={(e) => set("requiresApproval", e.target.checked)} />
-          Bookings need approval
-        </label>
-        <label className="flex items-center gap-2 text-sm text-slate-200">
-          Approval levels
-          <select className={`${control} w-16`} value={values.approvalLevels} onChange={(e) => set("approvalLevels", e.target.value === "2" ? 2 : 1)}>
-            <option value={1}>1</option>
-            <option value={2}>2</option>
-          </select>
-        </label>
-      </div>
+        {hasErrors(errors) && <Notice tone="error">Fix the highlighted fields first.</Notice>}
+        {save.isError && <Notice tone="error">{describeApiError(save.error)}</Notice>}
 
-      <OwnersEditor departmentId={values.departmentId} owners={owners} levels={values.approvalLevels} error={errors.owners} onChange={setOwners} />
-
-      {hasErrors(errors) && <Notice tone="error">Fix the highlighted fields first.</Notice>}
-      {save.isError && <Notice tone="error">{describeApiError(save.error)}</Notice>}
-
-      <div className="flex gap-2">
-        <button type="submit" disabled={save.isPending} className={primary}>
-          {save.isPending ? "Saving…" : original ? "Save changes" : "Create resource"}
-        </button>
-        <button type="button" disabled={save.isPending} onClick={() => onClose(null)} className={secondary}>
-          Cancel
-        </button>
-      </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" variant="primary" disabled={save.isPending}>
+            {save.isPending ? "Saving…" : original ? "Save changes" : "Create resource"}
+          </Button>
+          <Button disabled={save.isPending} onClick={() => onClose(null)}>
+            Cancel
+          </Button>
+        </div>
+      </AdminPanel>
     </form>
   );
 }

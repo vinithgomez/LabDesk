@@ -80,9 +80,9 @@ function renderPage() {
 describe("my bookings: series and waitlist", () => {
   it("badges a series date with a link to the series, and not a one-off", async () => {
     renderPage();
-    const seriesRow = (await screen.findByText("Weekly lab")).closest("tr") as HTMLElement;
+    const seriesRow = (await screen.findByText("Weekly lab")).closest("li") as HTMLElement;
     expect(within(seriesRow).getByRole("link", { name: "Repeats weekly: open the series" })).toHaveAttribute("href", "/series/s9");
-    const oneOff = screen.getByText("One-off").closest("tr") as HTMLElement;
+    const oneOff = screen.getByText("One-off").closest("li") as HTMLElement;
     expect(within(oneOff).queryByRole("link", { name: /Repeats/ })).not.toBeInTheDocument();
   });
 
@@ -91,17 +91,17 @@ describe("my bookings: series and waitlist", () => {
     renderPage();
     await user.click(await screen.findByRole("tab", { name: "Waitlist" }));
 
-    const waiting = (await screen.findByText("Project demo")).closest("tr") as HTMLElement;
+    const waiting = (await screen.findByText("Project demo")).closest("li") as HTMLElement;
     expect(within(waiting).getByText("Wed 7 Oct, 14:00–15:00")).toBeInTheDocument();
     expect(within(waiting).getByText("Waiting")).toBeInTheDocument();
-    const promoted = screen.getByText("Got it").closest("tr") as HTMLElement;
+    const promoted = screen.getByText("Got it").closest("li") as HTMLElement;
     expect(within(promoted).getByText("Booked for you")).toBeInTheDocument();
     expect(within(promoted).queryByRole("button")).not.toBeInTheDocument();
-    expect(within(screen.getByText("Too late").closest("tr") as HTMLElement).getByText("Expired")).toBeInTheDocument();
+    expect(within(screen.getByText("Too late").closest("li") as HTMLElement).getByText("Expired")).toBeInTheDocument();
 
     await user.click(within(waiting).getByRole("button", { name: "Leave" }));
     expect(mocked.mock.calls.some(([, init]) => init.method === "DELETE")).toBe(false);
-    await user.click(within(waiting).getByRole("button", { name: "Leave the waitlist" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Leave the waitlist" }));
     expect(mocked).toHaveBeenCalledWith("/api/waitlist/w1", { method: "DELETE" });
   });
 

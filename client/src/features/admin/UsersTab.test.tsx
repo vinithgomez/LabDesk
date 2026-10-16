@@ -61,7 +61,7 @@ describe("users tab", () => {
     await user.click(within(row).getByRole("button", { name: "Change…" }));
     expect(patches()).toHaveLength(0);
 
-    const confirm = within(row).getByRole("group", { name: "Confirm role change for Priya Nair" });
+    const confirm = screen.getByRole("dialog", { name: "Change Priya Nair's role?" });
     expect(confirm).toHaveTextContent(roleChangeWarning({ fullName: "Priya Nair", role: "student" }, "faculty"));
     await user.click(within(confirm).getByRole("button", { name: "Make faculty" }));
     expect(await screen.findByText("Priya Nair is now faculty.")).toBeInTheDocument();
@@ -82,8 +82,8 @@ describe("users tab", () => {
     const row = (await screen.findByText("Priya Nair")).closest("tr") as HTMLElement;
     await user.selectOptions(within(row).getByLabelText("Role for Priya Nair"), "admin");
     await user.click(within(row).getByRole("button", { name: "Change…" }));
-    await user.click(within(row).getByRole("button", { name: "Make admin" }));
-    expect(await within(row).findByText("That user doesn't exist.")).toBeInTheDocument();
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Make admin" }));
+    expect(await within(screen.getByRole("dialog")).findByText("That user doesn't exist.")).toBeInTheDocument();
   });
 });
 

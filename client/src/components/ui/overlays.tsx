@@ -83,7 +83,7 @@ export function Dialog({ open, onClose, title, description, children, footer, va
   const sheet = variant === "sheet";
   return createPortal(
     <div className={cn("fixed inset-0 z-50 flex", sheet ? "items-end" : "items-center justify-center p-4")}>
-      <div className="absolute inset-0 bg-ink/40" aria-hidden="true" onClick={onClose} />
+      <div className="absolute inset-0 bg-scrim" aria-hidden="true" onClick={onClose} />
       <div
         ref={root}
         role="dialog"
@@ -170,6 +170,54 @@ export function ConfirmDialog({
 /** A bottom sheet: the phone counterpart of a side panel or menu. */
 export function Sheet(props: Omit<DialogProps, "variant">) {
   return <Dialog {...props} variant="sheet" />;
+}
+
+/**
+ * A modal panel without its own header, for content that brings one (a
+ * form with its heading and close button): from a side edge on tablets and
+ * narrow laptops, from the bottom on phones. Focus is trapped and returned
+ * like a Dialog; Escape and the backdrop (the --scrim, dark in both themes)
+ * close it. From the bottom it is compact and shows a grabber, the usual
+ * sign of a sheet.
+ */
+export function Drawer({
+  open,
+  onClose,
+  label,
+  side,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** The accessible name of the panel. */
+  label: string;
+  side: "right" | "left" | "bottom";
+  children: ReactNode;
+}) {
+  const root = useFocusTrap(open, onClose);
+  if (!open) return null;
+  return createPortal(
+    <div className={cn("fixed inset-0 z-50 flex", side === "right" ? "justify-end" : side === "left" ? "justify-start" : "items-end")}>
+      <div className="absolute inset-0 bg-scrim" aria-hidden="true" onClick={onClose} />
+      <div
+        ref={root}
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+        tabIndex={-1}
+        className={cn(
+          "relative flex flex-col overflow-y-auto border-line bg-surface shadow-float",
+          side === "bottom"
+            ? "max-h-[72dvh] w-full rounded-t-panel border-t pb-[env(safe-area-inset-bottom)]"
+            : cn("h-full w-full max-w-[22rem]", side === "right" ? "border-l" : "border-r"),
+        )}
+      >
+        {side === "bottom" && <span aria-hidden="true" className="mx-auto mt-2 block h-1 w-10 shrink-0 rounded-full bg-line-strong" />}
+        {children}
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
 // ---- Toast ------------------------------------------------------------------

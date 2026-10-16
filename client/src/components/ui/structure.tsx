@@ -1,4 +1,5 @@
 import { useRef, type KeyboardEvent, type ReactNode } from "react";
+import { PHONE_QUERY, useMediaQuery } from "../../lib/use-media-query";
 import { cn } from "./util";
 
 export interface TabItem<T extends string> {
@@ -33,7 +34,14 @@ export function Tabs<T extends string>({
     refs.current.get(next.id)?.focus();
   };
   return (
-    <div role="tablist" aria-label={label} onKeyDown={onKey} className="flex gap-1 overflow-x-auto border-b border-line">
+    // The baseline is an inset line, not a border the tabs overlap with a negative margin: that 1px
+    // overflow made the scroll container grow a vertical scrollbar (stray arrows on Windows).
+    <div
+      role="tablist"
+      aria-label={label}
+      onKeyDown={onKey}
+      className="flex gap-1 overflow-x-auto overflow-y-hidden shadow-[inset_0_-1px_0_var(--line)]"
+    >
       {tabs.map((t) => {
         const selected = t.id === value;
         return (
@@ -50,7 +58,7 @@ export function Tabs<T extends string>({
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(t.id)}
             className={cn(
-              "-mb-px inline-flex min-h-11 items-center gap-1.5 border-b-2 px-3 text-body font-medium whitespace-nowrap md:min-h-9",
+              "inline-flex min-h-11 shrink-0 items-center gap-1.5 border-b-2 px-3 text-body font-medium whitespace-nowrap md:min-h-9",
               "transition-colors duration-150 ease-out",
               selected ? "border-cobalt text-ink" : "border-transparent text-ink-muted hover:text-ink",
             )}
@@ -86,7 +94,7 @@ export interface Column<Row> {
 /**
  * A data table with a sticky header and row hover; below 768px each row
  * becomes a stacked block (the primary column as its title, the rest as
- * label/value pairs). Only one of the two is ever displayed.
+ * label/value pairs). Only one of the two is rendered.
  */
 export function Table<Row>({
   columns,
@@ -105,71 +113,75 @@ export function Table<Row>({
 }) {
   const primary = columns.find((c) => c.primary);
   const rest = columns.filter((c) => !c.primary);
-  return (
-    <>
-      <table className="hidden w-full border-collapse text-left text-body md:table">
-        <caption className="sr-only">{caption}</caption>
-        <thead>
-          <tr>
-            {columns.map((c) => (
-              <th
-                key={c.key}
-                scope="col"
-                className={cn(
-                  "sticky top-0 z-10 border-b border-line bg-sunken px-3 py-2 text-small font-medium whitespace-nowrap text-ink-muted",
-                  c.align === "right" && "text-right",
-                  c.hideBelowXl && "hidden xl:table-cell",
-                )}
-              >
-                {c.header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={rowKey(row)} className="border-b border-line transition-colors duration-150 ease-out hover:bg-sunken/60">
+  const phone = useMediaQuery(PHONE_QUERY, false);
+  if (!phone) {
+    return (
+      <div className="relative overflow-x-auto">
+        <table className="w-full border-collapse text-left text-body">
+          <caption className="sr-only">{caption}</caption>
+          <thead>
+            <tr>
               {columns.map((c) => (
-                <td
+                <th
                   key={c.key}
+                  scope="col"
                   className={cn(
-                    "px-3 py-2.5 align-top",
+                    "sticky top-0 z-10 border-b border-line bg-sunken px-3 py-2 text-small font-medium whitespace-nowrap text-ink-muted",
                     c.align === "right" && "text-right",
-                    c.numeric && "tabular-nums",
-                    c.nowrap && "whitespace-nowrap",
                     c.hideBelowXl && "hidden xl:table-cell",
-                    c.className,
                   )}
                 >
-                  {c.cell(row)}
-                </td>
+                  {c.header}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <ul aria-label={caption} className="divide-y divide-line border-y border-line md:hidden">
-        {rows.map((row) => (
-          <li key={rowKey(row)} className="flex flex-col gap-1.5 py-3">
-            {mobileRow ? (
-              mobileRow(row)
-            ) : (
-              <>
-                {primary && <div className="text-lead">{primary.cell(row)}</div>}
-                <dl className="grid grid-cols-[minmax(6.5rem,auto)_1fr] gap-x-3 gap-y-1 text-body">
-                  {rest.map((c) => (
-                    <div key={c.key} className="contents">
-                      <dt className="text-ink-muted">{c.header}</dt>
-                      <dd className={cn("m-0 text-ink", c.numeric && "tabular-nums")}>{c.cell(row)}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </>
-            )}
-          </li>
-        ))}
-      </ul>
-    </>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={rowKey(row)} className="border-b border-line transition-colors duration-150 ease-out hover:bg-sunken/60">
+                {columns.map((c) => (
+                  <td
+                    key={c.key}
+                    className={cn(
+                      "px-3 py-2.5 align-top",
+                      c.align === "right" && "text-right",
+                      c.numeric && "tabular-nums",
+                      c.nowrap && "whitespace-nowrap",
+                      c.hideBelowXl && "hidden xl:table-cell",
+                      c.className,
+                    )}
+                  >
+                    {c.cell(row)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  return (
+    <ul aria-label={caption} className="divide-y divide-line border-y border-line">
+      {rows.map((row) => (
+        <li key={rowKey(row)} className="flex flex-col gap-1.5 py-3">
+          {mobileRow ? (
+            mobileRow(row)
+          ) : (
+            <>
+              {primary && <div className="text-lead">{primary.cell(row)}</div>}
+              <dl className="grid grid-cols-[minmax(6.5rem,auto)_1fr] gap-x-3 gap-y-1 text-body">
+                {rest.map((c) => (
+                  <div key={c.key} className="contents">
+                    <dt className="text-ink-muted">{c.header}</dt>
+                    <dd className={cn("m-0 text-ink", c.numeric && "tabular-nums")}>{c.cell(row)}</dd>
+                  </div>
+                ))}
+              </dl>
+            </>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }

@@ -33,8 +33,12 @@ const STATUS: Record<StatusKind, { label: string; icon: LucideIcon; tone: string
   expired: { label: "Expired", icon: TimerOff, tone: "bg-st-expired-bg text-st-expired-fg border-st-expired-border" },
 };
 
-/** A booking status: colour, icon and text, never colour alone (DESIGN.md §2). */
-export function StatusPill({ status, className }: { status: StatusKind; className?: string }) {
+/**
+ * A booking status: colour, icon and text, never colour alone (DESIGN.md §2).
+ * `label` renames it for a state that borrows a status's look (a waitlist
+ * entry that is "Waiting" looks pending).
+ */
+export function StatusPill({ status, label, className }: { status: StatusKind; label?: string; className?: string }) {
   const s = STATUS[status];
   return (
     <span
@@ -45,17 +49,18 @@ export function StatusPill({ status, className }: { status: StatusKind; classNam
       )}
     >
       <s.icon aria-hidden="true" size={12} strokeWidth={ICON_STROKE} />
-      {s.label}
+      {label ?? s.label}
     </span>
   );
 }
 
-export type BadgeTone = "neutral" | "cobalt" | "pending";
+export type BadgeTone = "neutral" | "cobalt" | "pending" | "danger";
 
 const BADGE: Record<BadgeTone, string> = {
   neutral: "bg-sunken text-ink-muted border-line",
   cobalt: "bg-cobalt-tint text-st-approved-fg border-st-approved-border",
   pending: "bg-st-pending-bg text-st-pending-fg border-st-pending-border",
+  danger: "bg-st-cancelled-bg text-st-cancelled-fg border-st-cancelled-border",
 };
 
 /** A small label for a property ("Needs approval", "Lab"). Not a status: use StatusPill for those. */

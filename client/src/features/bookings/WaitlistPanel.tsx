@@ -1,102 +1,112 @@
+import { Hourglass } from "lucide-react";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Button, ConfirmDialog, EmptyState, Skeleton, StatusPill, useToast } from "../../components/ui";
 import { describeApiError } from "../../lib/api-errors";
 import { formatPeriod } from "../calendar/format";
+import { ListRow } from "./ListRow";
 import { WAITLIST_STATUS } from "./status";
-import { ToneBadge } from "./StatusBadge";
 import type { WaitlistEntry } from "./types";
 import { useLeaveWaitlist, useMyWaitlist, useResourceNames } from "./use-bookings";
-
-const smallButton =
-  "min-h-7 rounded px-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-50";
 
 /** My waitlist entries: what I'm waiting for, what became a booking, and leaving. */
 export function WaitlistPanel() {
   const entries = useMyWaitlist();
   const resourceName = useResourceNames();
+  const leave = useLeaveWaitlist();
+  const toast = useToast();
+  const [leaving, setLeaving] = useState<WaitlistEntry | null>(null);
+
+  const closeConfirm = () => {
+    setLeaving(null);
+    leave.reset();
+  };
 
   if (entries.isError) {
     return (
-      <p role="alert" className="rounded-md bg-rose-600/20 p-2 text-sm text-rose-200">
+      <p role="alert" className="py-4 text-body text-danger-text">
         {describeApiError(entries.error)}
       </p>
     );
   }
-  if (entries.isPending) return <p className="text-sm text-slate-400">Loading…</p>;
+  if (entries.isPending) {
+    return (
+      <div role="status" aria-label="Loading the waitlist" className="flex flex-col gap-3 py-4">
+        <Skeleton className="h-4 w-48" />
+        <Skeleton className="h-4 w-64" />
+      </div>
+    );
+  }
   if (entries.data.length === 0) {
     return (
-      <p className="py-2 text-sm text-slate-400">
-        You aren't waiting for anything. When a time you want is taken, the calendar offers the waitlist.
-      </p>
+      <EmptyState icon={Hourglass} title="You aren't waiting for anything">
+        When a time you want is already taken, the calendar offers to put you on its waitlist. If it frees up, it is booked for you.
+      </EmptyState>
     );
   }
 
   return (
-    <div className="relative overflow-x-auto rounded-lg border border-slate-800">
-      <table className="w-full text-sm">
-        <thead className="bg-slate-900 text-left text-xs uppercase tracking-wide text-slate-400">
-          <tr>
-            <th scope="col" className="px-3 py-2 font-medium">Wanted (IST)</th>
-            <th scope="col" className="px-3 py-2 font-medium">Resource</th>
-            <th scope="col" className="px-3 py-2 font-medium">Purpose</th>
-            <th scope="col" className="px-3 py-2 font-medium">Status</th>
-            <th scope="col" className="px-3 py-2 font-medium"><span className="sr-only">Actions</span></th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-800">
-          {entries.data.map((e) => (
-            <tr key={e.id} className="align-top">
-              <td className="whitespace-nowrap px-3 py-1.5 tabular-nums text-slate-200">
-                {formatPeriod(new Date(e.desiredPeriod.start), new Date(e.desiredPeriod.end))}
-              </td>
-              <td className="px-3 py-1.5">
-                <Link to={`/resources/${e.resourceId}`} className="text-indigo-300 hover:underline">
-                  {resourceName(e.resourceId)}
-                </Link>
-              </td>
-              <td className="px-3 py-1.5 text-slate-300">
-                {e.purpose || <span className="text-slate-500">—</span>}
-                {e.status === "promoted" && <span className="mt-0.5 block text-xs text-slate-400">It's in your upcoming bookings.</span>}
-                {e.status === "expired" && <span className="mt-0.5 block text-xs text-slate-400">The time passed without a slot freeing up.</span>}
-              </td>
-              <td className="px-3 py-1.5">
-                <ToneBadge tone={WAITLIST_STATUS[e.status].tone} label={WAITLIST_STATUS[e.status].label} />
-              </td>
-              <td className="px-3 py-1.5 text-right">{e.status === "waiting" && <LeaveControl entry={e} />}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
+    <>
+      <ul className="flex flex-col divide-y divide-line border-b border-line">
+        {entries.data.map((e) => {
+          const state = WAITLIST_STATUS[e.status];
+          return (
+            <ListRow
+              key={e.id}
+              start={new Date(e.desiredPeriod.start)}
+              end={new Date(e.desiredPeriod.end)}
+              resourceId={e.resourceId}
+              resourceName={resourceName(e.resourceId)}
+              status={<StatusPill status={state.look} label={state.label} />}
+              details={
+                <>
+                  <span className="text-ink">{e.purpose || <span className="text-ink-faint">No purpose given</span>}</span>
+                  {e.status === "promoted" && <span className="mt-1 block text-small text-ink-muted">It&apos;s in your upcoming bookings.</span>}
+                  {e.status === "expired" && (
+                    <span className="mt-1 block text-small text-ink-muted">The time passed without a slot freeing up.</span>
+                  )}
+                </>
+              }
+              action={
+                e.status === "waiting" ? (
+                  <Button variant="quiet-danger" onClick={() => setLeaving(e)} className="-ml-3 px-3 lg:ml-0">
+                    Leave
+                  </Button>
+                ) : undefined
+              }
+            />
+          );
+        })}
+      </ul>
 
-function LeaveControl({ entry }: { entry: WaitlistEntry }) {
-  const [confirming, setConfirming] = useState(false);
-  const leave = useLeaveWaitlist();
-  if (leave.isError) {
-    return (
-      <span role="alert" className="text-xs text-rose-300">
-        {describeApiError(leave.error)}
-      </span>
-    );
-  }
-  if (!confirming) {
-    return (
-      <button type="button" onClick={() => setConfirming(true)} className={`${smallButton} border border-slate-600 text-slate-200`}>
-        Leave
-      </button>
-    );
-  }
-  return (
-    <span className="inline-flex flex-wrap items-center justify-end gap-1.5" role="group" aria-label="Confirm leaving the waitlist">
-      <span className="text-xs text-slate-300">Stop waiting for this time?</span>
-      <button type="button" autoFocus disabled={leave.isPending} onClick={() => leave.mutate(entry.id)} className={`${smallButton} bg-rose-600 text-white`}>
-        {leave.isPending ? "Leaving…" : "Leave the waitlist"}
-      </button>
-      <button type="button" disabled={leave.isPending} onClick={() => setConfirming(false)} className={`${smallButton} text-slate-300`}>
-        Keep waiting
-      </button>
-    </span>
+      <ConfirmDialog
+        open={leaving !== null}
+        onClose={closeConfirm}
+        title="Leave the waitlist?"
+        description={
+          leaving
+            ? `${resourceName(leaving.resourceId)}, ${formatPeriod(new Date(leaving.desiredPeriod.start), new Date(leaving.desiredPeriod.end))}. If the time frees up, it won't be booked for you.`
+            : ""
+        }
+        confirmLabel="Leave the waitlist"
+        cancelLabel="Keep waiting"
+        danger
+        busy={leave.isPending}
+        onConfirm={() => {
+          if (!leaving) return;
+          leave.mutate(leaving.id, {
+            onSuccess: () => {
+              closeConfirm();
+              toast("You've left the waitlist.");
+            },
+          });
+        }}
+      >
+        {leave.isError && (
+          <p role="alert" className="text-body text-danger-text">
+            {describeApiError(leave.error)}
+          </p>
+        )}
+      </ConfirmDialog>
+    </>
   );
 }

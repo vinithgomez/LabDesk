@@ -1,9 +1,10 @@
+import { X } from "lucide-react";
 import { useState } from "react";
+import { Avatar, Button, Field, Input, Select } from "../../components/ui";
 import { describeApiError } from "../../lib/api-errors";
 import { ROLE_LABEL } from "../auth/use-me";
 import { useDebounced } from "../resources/use-resources";
 import type { OwnerDraft } from "./resource-form";
-import { control, link } from "./ui";
 import { useNamesIn, useUsers } from "./use-users";
 
 /**
@@ -35,60 +36,64 @@ export function OwnersEditor({
     onChange(owners.map((o) => (o.userId === userId ? { ...o, approvalLevel } : o)));
 
   return (
-    <fieldset className="flex flex-col gap-2 rounded-md border border-slate-800 p-2" aria-describedby={error ? "owners-error" : undefined}>
-      <legend className="px-1 text-xs text-slate-400">Owners (they approve and manage it)</legend>
+    <fieldset className="flex flex-col gap-3 border-t border-line pt-4" aria-describedby={error ? "owners-error" : undefined}>
+      <legend className="float-left mb-1 text-body font-semibold text-ink">Owners (they approve and manage it)</legend>
       {owners.length === 0 ? (
-        <p className="text-xs text-slate-500">No owners.</p>
+        <p className="clear-left text-body text-ink-muted">No owners yet.</p>
       ) : (
-        <ul className="flex flex-col gap-1">
+        <ul className="clear-left flex flex-col divide-y divide-line border-y border-line">
           {owners.map((o) => {
             const user = names.get(o.userId);
+            const name = user?.fullName ?? `User ${o.userId.slice(0, 8)}…`;
             return (
-              <li key={o.userId} className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="min-w-0 flex-1 truncate text-slate-100">
-                  {user ? `${user.fullName} (${ROLE_LABEL[user.role]})` : `User ${o.userId.slice(0, 8)}…`}
+              <li key={o.userId} className="flex flex-wrap items-center gap-3 py-2">
+                <Avatar name={user?.fullName ?? "?"} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-body font-medium text-ink">{name}</span>
+                  {user && <span className="block text-small text-ink-muted">{ROLE_LABEL[user.role]}</span>}
                 </span>
-                <label className="flex items-center gap-1 text-xs text-slate-400">
+                <label className="flex items-center gap-2 text-small text-ink-muted">
                   Level
-                  <select
-                    className={`${control} w-16`}
+                  <Select
+                    className="w-20"
                     value={o.approvalLevel}
                     onChange={(e) => setLevel(o.userId, e.target.value === "2" ? 2 : 1)}
                     aria-label={`Approval level for ${user?.fullName ?? "this owner"}`}
                   >
                     <option value={1}>1</option>
                     {(levels === 2 || o.approvalLevel === 2) && <option value={2}>2</option>}
-                  </select>
+                  </Select>
                 </label>
-                <button type="button" className={link} onClick={() => onChange(owners.filter((x) => x.userId !== o.userId))}>
+                <Button variant="quiet-danger" icon={X} onClick={() => onChange(owners.filter((x) => x.userId !== o.userId))} className="px-3">
                   Remove
-                </button>
+                </Button>
               </li>
             );
           })}
         </ul>
       )}
 
-      <label className="flex flex-col gap-1 text-xs text-slate-400">
-        Add an owner
-        <input
-          className={control}
-          type="search"
-          placeholder={departmentId ? "Search staff by name" : "Choose a department first"}
-          disabled={!departmentId}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-      </label>
-      {candidates.isError && <p className="text-xs text-rose-300">{describeApiError(candidates.error)}</p>}
+      <Field label="Add an owner" className="clear-left md:max-w-md">
+        {(control) => (
+          <Input
+            {...control}
+            type="search"
+            placeholder={departmentId ? "Search staff by name" : "Choose a department first"}
+            disabled={!departmentId}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        )}
+      </Field>
+      {candidates.isError && <p className="text-small text-danger-text">{describeApiError(candidates.error)}</p>}
       {q.trim() !== "" && candidates.data && (
-        <ul className="flex max-h-40 flex-col overflow-y-auto rounded-md border border-slate-800" aria-label="Matching people">
-          {candidates.data.length === 0 && <li className="px-2 py-1 text-xs text-slate-500">Nobody matches.</li>}
+        <ul className="flex max-h-48 flex-col overflow-y-auto rounded-control border border-line md:max-w-md" aria-label="Matching people">
+          {candidates.data.length === 0 && <li className="px-3 py-2 text-small text-ink-muted">Nobody matches.</li>}
           {candidates.data.map((u) => {
             const student = u.role === "student";
             const already = ownerIds.has(u.id);
             return (
-              <li key={u.id}>
+              <li key={u.id} className="border-b border-line last:border-b-0">
                 <button
                   type="button"
                   disabled={student || already}
@@ -96,12 +101,12 @@ export function OwnersEditor({
                     onChange([...owners, { userId: u.id, approvalLevel: 1 }]);
                     setSearch("");
                   }}
-                  className="flex w-full items-center justify-between gap-2 px-2 py-1 text-left text-sm text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-400"
+                  className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-1.5 text-left text-body text-ink hover:bg-sunken focus-visible:-outline-offset-2 disabled:cursor-not-allowed disabled:text-ink-faint disabled:hover:bg-transparent"
                 >
-                  <span className="truncate">
-                    {u.fullName} <span className="text-xs text-slate-400">{u.email}</span>
+                  <span className="min-w-0 truncate">
+                    {u.fullName} <span className="text-small text-ink-muted">{u.email}</span>
                   </span>
-                  <span className="shrink-0 text-xs">
+                  <span className="shrink-0 text-small">
                     {already ? "Already an owner" : student ? "Students can't own resources" : ROLE_LABEL[u.role]}
                   </span>
                 </button>
@@ -111,7 +116,7 @@ export function OwnersEditor({
         </ul>
       )}
       {error && (
-        <p id="owners-error" className="text-xs text-rose-300">
+        <p id="owners-error" className="text-small text-danger-text">
           {error}
         </p>
       )}

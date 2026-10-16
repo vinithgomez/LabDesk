@@ -2,13 +2,15 @@ import { LoaderCircle, type LucideIcon } from "lucide-react";
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { cn, ICON_STROKE } from "./util";
 
-export type ButtonVariant = "primary" | "secondary" | "quiet" | "danger";
+export type ButtonVariant = "primary" | "secondary" | "quiet" | "danger" | "quiet-danger";
 
 const VARIANT: Record<ButtonVariant, string> = {
   primary: "bg-primary text-on-cobalt hover:bg-primary-strong",
   secondary: "border border-line-strong bg-surface text-ink hover:bg-sunken",
   quiet: "text-cobalt hover:bg-cobalt-tint",
   danger: "bg-danger text-on-cobalt hover:brightness-95",
+  // A destructive action repeated on every row: quiet until hovered; its confirm dialog carries the danger.
+  "quiet-danger": "text-ink-muted hover:bg-st-cancelled-bg hover:text-st-cancelled-fg",
 };
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

@@ -8,6 +8,10 @@ export const formatTime = (instant: Date) => formatInTimeZone(instant, IST, "HH:
 /** "Mon 28" for a column header. */
 export const formatDayShort = (day: DayKey) => formatInTimeZone(istDayStart(day), IST, "EEE d");
 
+/** "Mon" and "28": a column header, on two lines. */
+export const formatWeekday = (day: DayKey) => formatInTimeZone(istDayStart(day), IST, "EEE");
+export const formatDayOfMonth = (day: DayKey) => formatInTimeZone(istDayStart(day), IST, "d");
+
 /** "Monday 28 September" for screen readers. */
 export const formatDayLong = (day: DayKey) => formatInTimeZone(istDayStart(day), IST, "EEEE d MMMM");
 
@@ -27,6 +31,19 @@ export function formatMinute(minute: number): string {
   const h = Math.floor(minute / 60);
   const m = minute % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/** A short length for labels on the grid: "30 min", "1 h", "1 h 30 min". */
+export function formatLength(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m} min`;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}
+
+/** "10:00 to 11:30, 1 h 30 min": a chosen or dragged time, as the grid labels it. */
+export function formatSpan(start: Date, end: Date): string {
+  return `${formatTime(start)} to ${formatTime(end)}, ${formatLength(Math.round((end.getTime() - start.getTime()) / 60_000))}`;
 }
 
 /** "Fri 2 Oct, 10:15" */

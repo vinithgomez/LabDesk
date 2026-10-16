@@ -1,31 +1,19 @@
+import { Select, type FieldControlProps } from "../../components/ui";
 import type { Resource } from "../resources/use-resources";
-import { control } from "./ui";
 
-/** A resource select for the admin tabs; deactivated resources are marked. */
+/** A resource select for the admin tabs; deactivated resources are marked. Pass it a Field's control props. */
 export function ResourcePicker({
-  id,
   resources,
   value,
   onChange,
-  invalid = false,
-  describedBy,
-}: {
-  id: string;
+  ...control
+}: FieldControlProps & {
   resources: Resource[];
   value: string;
   onChange: (id: string) => void;
-  invalid?: boolean;
-  describedBy?: string;
 }) {
   return (
-    <select
-      id={id}
-      className={control}
-      value={value}
-      aria-invalid={invalid}
-      aria-describedby={describedBy}
-      onChange={(e) => onChange(e.target.value)}
-    >
+    <Select {...control} value={value} onChange={(e) => onChange(e.target.value)}>
       <option value="">Choose a resource…</option>
       {[...resources]
         .sort((a, b) => a.name.localeCompare(b.name))
@@ -35,6 +23,6 @@ export function ResourcePicker({
             {r.isActive ? "" : " (deactivated)"}
           </option>
         ))}
-    </select>
+    </Select>
   );
 }

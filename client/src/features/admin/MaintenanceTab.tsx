@@ -1,9 +1,11 @@
+import { Wrench } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import { Button, ConfirmDialog, EmptyState, Field, Input, Skeleton } from "../../components/ui";
 import { describeApiError } from "../../lib/api-errors";
 import { useMe } from "../auth/use-me";
 import { istInputToInstant, formatSpan, maintenanceWarning, validateMaintenance, type MaintenanceDraft, type MaintenanceErrors } from "./maintenance";
 import { ResourcePicker } from "./ResourcePicker";
-import { Field, Notice, control, danger, link, primary, secondary } from "./ui";
+import { AdminPanel, Notice } from "./ui";
 import { useAdminResources } from "./use-admin-resources";
 import { useCreateMaintenance, useMaintenanceWindows, useOverlapPreview, useRemoveMaintenance, type MaintenanceWindow } from "./use-maintenance";
 import { useNamesIn } from "./use-users";
@@ -19,37 +21,52 @@ export default function MaintenanceTab() {
   const [notice, setNotice] = useState<string | null>(null);
 
   return (
-    <section className="flex flex-col gap-3" aria-label="Maintenance">
-      <div className="max-w-sm">
-        <label htmlFor="mt-resource" className="text-xs text-slate-400">
-          Resource
-        </label>
-        <ResourcePicker id="mt-resource" resources={resources.data ?? []} value={resourceId} onChange={(id) => { setResourceId(id); setNotice(null); }} />
-      </div>
+    <section className="flex flex-col gap-6" aria-label="Maintenance">
+      <Field id="mt-resource" label="Resource" className="md:max-w-sm">
+        {(control) => (
+          <ResourcePicker
+            {...control}
+            resources={resources.data ?? []}
+            value={resourceId}
+            onChange={(id) => {
+              setResourceId(id);
+              setNotice(null);
+            }}
+          />
+        )}
+      </Field>
       {notice && <Notice tone="ok">{notice}</Notice>}
 
-      {resource && (
+      {!resource ? (
+        <EmptyState icon={Wrench} title="Choose a resource">
+          Its upcoming maintenance windows appear here, and you can schedule a new one.
+        </EmptyState>
+      ) : (
         <>
           <CreateWindow key={resource.id} resourceId={resource.id} resourceName={resource.name} onCreated={setNotice} />
-          <h2 className="text-sm font-semibold text-white">Upcoming windows on {resource.name}</h2>
-          {windows.isError ? (
-            <Notice tone="error">{describeApiError(windows.error)}</Notice>
-          ) : windows.isPending ? (
-            <p className="text-sm text-slate-400">Loading…</p>
-          ) : windows.data.length === 0 ? (
-            <p className="text-sm text-slate-400">None scheduled.</p>
-          ) : (
-            <ul className="flex flex-col divide-y divide-slate-800 rounded-lg border border-slate-800">
-              {windows.data.map((w) => (
-                <WindowRow
-                  key={w.id}
-                  window={w}
-                  createdBy={w.createdBy === me.data?.id ? "you" : (names.get(w.createdBy)?.fullName ?? "another admin or owner")}
-                  onRemoved={() => setNotice("Window removed. Bookings it cancelled stay cancelled.")}
-                />
-              ))}
-            </ul>
-          )}
+          <div className="flex flex-col gap-2">
+            <h2 className="text-lead font-semibold text-ink">Upcoming windows on {resource.name}</h2>
+            {windows.isError ? (
+              <Notice tone="error">{describeApiError(windows.error)}</Notice>
+            ) : windows.isPending ? (
+              <div aria-label="Loading windows" className="flex flex-col gap-2 border-y border-line py-3">
+                <Skeleton className="h-4 w-1/2" />
+              </div>
+            ) : windows.data.length === 0 ? (
+              <p className="border-y border-line py-3 text-body text-ink-muted">None scheduled.</p>
+            ) : (
+              <ul className="flex flex-col divide-y divide-line border-y border-line">
+                {windows.data.map((w) => (
+                  <WindowRow
+                    key={w.id}
+                    window={w}
+                    createdBy={w.createdBy === me.data?.id ? "you" : (names.get(w.createdBy)?.fullName ?? "another admin or owner")}
+                    onRemoved={() => setNotice("Window removed. Bookings it cancelled stay cancelled.")}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
         </>
       )}
     </section>
@@ -76,6 +93,11 @@ function CreateWindow({ resourceId, resourceName, onCreated }: { resourceId: str
     if (Object.keys(found).length === 0) setConfirming(true);
   };
 
+  const back = () => {
+    setConfirming(false);
+    create.reset();
+  };
+
   const confirm = () => {
     if (!start || !end) return;
     create.mutate(
@@ -92,39 +114,43 @@ function CreateWindow({ resourceId, resourceName, onCreated }: { resourceId: str
   };
 
   return (
-    <form onSubmit={review} noValidate aria-label="New maintenance window" className="flex flex-col gap-2 rounded-lg border border-slate-700 bg-slate-900 p-3">
-      <h2 className="text-sm font-semibold text-white">New maintenance window</h2>
-      <div className="grid gap-2 sm:grid-cols-[12rem_12rem_1fr]">
-        <Field id="mt-start" label="Starts (IST)" error={errors.start}>
-          {(a11y) => <input {...a11y} type="datetime-local" className={control} value={draft.start} onChange={(e) => set("start", e.target.value)} />}
-        </Field>
-        <Field id="mt-end" label="Ends (IST)" error={errors.end}>
-          {(a11y) => <input {...a11y} type="datetime-local" className={control} value={draft.end} onChange={(e) => set("end", e.target.value)} />}
-        </Field>
-        <Field id="mt-reason" label="Reason (bookers see this)" error={errors.reason}>
-          {(a11y) => <input {...a11y} className={control} maxLength={500} value={draft.reason} onChange={(e) => set("reason", e.target.value)} />}
-        </Field>
-      </div>
-      {confirming && start && end ? (
-        <div role="group" aria-label="Confirm maintenance window" className="flex flex-col gap-2 rounded-md border border-amber-400/40 bg-amber-400/10 p-2">
-          <p className="text-sm text-amber-100">{maintenanceWarning(resourceName, start, end, overlapping)}</p>
-          {create.isError && <p className="text-sm text-rose-300">{describeApiError(create.error)}</p>}
-          <div className="flex gap-2">
-            <button type="button" autoFocus disabled={create.isPending} onClick={confirm} className={danger}>
-              {create.isPending ? "Creating…" : "Create window and cancel overlapping bookings"}
-            </button>
-            <button type="button" disabled={create.isPending} onClick={() => setConfirming(false)} className={secondary}>
-              Back
-            </button>
-          </div>
+    <form onSubmit={review} noValidate aria-label="New maintenance window">
+      <AdminPanel title="New maintenance window">
+        <div className="grid gap-x-6 gap-y-4 md:grid-cols-2">
+          <Field id="mt-start" label="Starts (IST)" error={errors.start}>
+            {(control) => <Input {...control} type="datetime-local" value={draft.start} onChange={(e) => set("start", e.target.value)} />}
+          </Field>
+          <Field id="mt-end" label="Ends (IST)" error={errors.end}>
+            {(control) => <Input {...control} type="datetime-local" value={draft.end} onChange={(e) => set("end", e.target.value)} />}
+          </Field>
+          <Field id="mt-reason" label="Reason (bookers see this)" error={errors.reason} className="md:col-span-2">
+            {(control) => <Input {...control} maxLength={500} value={draft.reason} onChange={(e) => set("reason", e.target.value)} />}
+          </Field>
         </div>
-      ) : (
         <div>
-          <button type="submit" className={primary}>
+          <Button type="submit" variant="primary">
             Review…
-          </button>
+          </Button>
         </div>
-      )}
+      </AdminPanel>
+
+      <ConfirmDialog
+        open={confirming && start !== null && end !== null}
+        onClose={back}
+        title="Create this maintenance window?"
+        description={start && end ? maintenanceWarning(resourceName, start, end, overlapping) : ""}
+        confirmLabel="Create window and cancel overlapping bookings"
+        cancelLabel="Back"
+        danger
+        busy={create.isPending}
+        onConfirm={confirm}
+      >
+        {create.isError && (
+          <p role="alert" className="text-body text-danger-text">
+            {describeApiError(create.error)}
+          </p>
+        )}
+      </ConfirmDialog>
     </form>
   );
 }
@@ -133,28 +159,36 @@ function WindowRow({ window: w, createdBy, onRemoved }: { window: MaintenanceWin
   const [confirming, setConfirming] = useState(false);
   const remove = useRemoveMaintenance();
   return (
-    <li className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 text-sm">
+    <li className="flex flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between">
       <div className="min-w-0">
-        <span className="tabular-nums text-slate-100">{formatSpan(new Date(w.start), new Date(w.end))}</span>
-        <span className="text-slate-300"> · {w.reason}</span>
-        <span className="text-xs text-slate-500"> · by {createdBy}</span>
+        <p className="text-body font-medium text-ink tabular-nums">{formatSpan(new Date(w.start), new Date(w.end))}</p>
+        <p className="text-body text-ink-muted">
+          {w.reason}. Scheduled by {createdBy}.
+        </p>
       </div>
-      {confirming ? (
-        <span role="group" aria-label="Confirm removal" className="flex flex-wrap items-center gap-1.5">
-          <span className="text-xs text-slate-300">Remove it? Bookings it cancelled stay cancelled.</span>
-          <button type="button" autoFocus disabled={remove.isPending} className={danger} onClick={() => remove.mutate(w.id, { onSuccess: onRemoved })}>
-            Remove
-          </button>
-          <button type="button" className={link} onClick={() => setConfirming(false)}>
-            Keep
-          </button>
-        </span>
-      ) : (
-        <button type="button" className={link} onClick={() => setConfirming(true)}>
-          Remove…
-        </button>
-      )}
-      {remove.isError && <p className="w-full text-xs text-rose-300">{describeApiError(remove.error)}</p>}
+      <Button variant="quiet-danger" onClick={() => setConfirming(true)} className="-ml-3 self-start px-3 md:ml-0 md:self-auto">
+        Remove…
+      </Button>
+      <ConfirmDialog
+        open={confirming}
+        onClose={() => {
+          setConfirming(false);
+          remove.reset();
+        }}
+        title="Remove this maintenance window?"
+        description={`${formatSpan(new Date(w.start), new Date(w.end))}. Bookings it cancelled stay cancelled.`}
+        confirmLabel="Remove"
+        cancelLabel="Keep"
+        danger
+        busy={remove.isPending}
+        onConfirm={() => remove.mutate(w.id, { onSuccess: onRemoved })}
+      >
+        {remove.isError && (
+          <p role="alert" className="text-body text-danger-text">
+            {describeApiError(remove.error)}
+          </p>
+        )}
+      </ConfirmDialog>
     </li>
   );
 }

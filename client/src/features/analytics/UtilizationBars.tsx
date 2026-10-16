@@ -1,22 +1,23 @@
+import { Badge } from "../../components/ui";
 import { barWidth, hours, percent } from "./format";
 import type { UtilizationReport } from "./types";
 
-/** One bar per resource, most used first (the server's order). */
+/** One row per resource, most used first (the server's order): name, a thin bar, the figure, and a plain line of hours. */
 export function UtilizationBars({ report }: { report: UtilizationReport }) {
-  if (report.resources.length === 0) return <p className="text-slate-400">No resources in this department.</p>;
+  if (report.resources.length === 0) return <p className="text-body text-ink-muted">No resources in this department.</p>;
   return (
-    <ul className="flex flex-col gap-4">
+    <ul className="flex flex-col divide-y divide-line border-y border-line">
       {report.resources.map((r) => (
-        <li key={r.resourceId} className="flex flex-col gap-1.5">
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="font-medium text-slate-100">
-              {r.name}
-              {!r.isActive && <span className="ml-2 rounded bg-slate-700 px-1.5 py-0.5 text-xs text-slate-300">inactive</span>}
-            </span>
-            <span className="tabular-nums font-semibold text-white">{percent(r.utilization)}</span>
-          </div>
+        <li key={r.resourceId} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1.5 py-3 md:grid-cols-[minmax(10rem,16rem)_minmax(0,1fr)_4rem]">
+          <span className="flex min-w-0 items-center gap-2 text-body font-medium text-ink md:col-start-1 md:row-start-1">
+            <span className="truncate">{r.name}</span>
+            {!r.isActive && <Badge>Inactive</Badge>}
+          </span>
+          <span className="text-right font-condensed text-lead font-semibold text-ink tabular-nums md:col-start-3 md:row-start-1">
+            {percent(r.utilization)}
+          </span>
           <div
-            className="h-2.5 overflow-hidden rounded-full bg-slate-800"
+            className="col-span-2 h-1.5 overflow-hidden rounded-chip bg-sunken md:col-span-1 md:col-start-2 md:row-start-1"
             role="meter"
             aria-label={`${r.name} utilization`}
             aria-valuemin={0}
@@ -24,11 +25,12 @@ export function UtilizationBars({ report }: { report: UtilizationReport }) {
             aria-valuenow={Math.round((r.utilization ?? 0) * 100)}
             aria-valuetext={percent(r.utilization)}
           >
-            <div className="h-full rounded-full bg-indigo-500" style={{ width: barWidth(r.utilization) }} />
+            <div className="h-full rounded-chip bg-cobalt" style={{ width: barWidth(r.utilization) }} />
           </div>
-          <p className="text-xs text-slate-400">
-            {hours(r.inHoursMinutes)} used · {hours(r.bookedMinutes)} booked · {hours(r.availableMinutes)} open
-            {r.offHoursMinutes > 0 && <> · +{hours(r.offHoursMinutes)} outside business hours (not counted)</>}
+          <p className="col-span-2 text-small text-ink-muted md:col-start-2 md:row-start-2">
+            {hours(r.inHoursMinutes)} used of {hours(r.availableMinutes)} open; {hours(r.bookedMinutes)} booked.
+            {/* Only when it rounds to something: a few stray minutes would read "0.0 h". */}
+            {r.offHoursMinutes >= 3 && <> Also {hours(r.offHoursMinutes)} outside business hours, not counted.</>}
           </p>
         </li>
       ))}

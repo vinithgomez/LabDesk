@@ -1,8 +1,12 @@
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { Skeleton } from "../../components/ui";
 import { ApiError } from "../../lib/api";
 
-/** A titled dashboard section that renders its query's loading and error states. */
+/**
+ * A titled dashboard section that renders its query's loading and error
+ * states. An open section under a heading, not a card (DESIGN.md §2).
+ */
 export function Panel<T>({
   title,
   description,
@@ -17,17 +21,19 @@ export function Panel<T>({
   children: (data: T) => ReactNode;
 }) {
   return (
-    <section className={`flex flex-col gap-4 rounded-2xl border border-slate-800 bg-slate-900 p-5 ${className}`}>
+    <section className={`flex min-w-0 flex-col gap-4 ${className}`}>
       <header className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold text-white">{title}</h2>
-        {description && <p className="text-sm text-slate-400">{description}</p>}
+        <h2 className="text-h3 font-semibold text-ink">{title}</h2>
+        {description && <p className="max-w-[72ch] text-body text-ink-muted">{description}</p>}
       </header>
       {query.isPending ? (
-        <p role="status" className="text-slate-400">
-          Loading…
-        </p>
+        <div aria-label={`Loading ${title.toLowerCase()}`} className="flex flex-col gap-2">
+          <Skeleton className="h-4 w-2/3" />
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-4 w-3/5" />
+        </div>
       ) : query.isError ? (
-        <p role="alert" className="rounded-xl bg-rose-600/20 p-3 text-rose-200">
+        <p role="alert" className="text-body text-danger-text">
           {query.error instanceof ApiError ? query.error.message : "Couldn't load this section."}
         </p>
       ) : (

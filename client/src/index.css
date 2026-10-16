@@ -12,6 +12,18 @@
   --sunken: #EAECE7;
   --line: #D9DCD4;
   --line-strong: #848880;
+  --grid-hour: #CBCFC5;
+  --grid-half: #E1E4DC;
+  --busy: #EAECE7;
+  --busy-edge: #B4B9AF;
+  --busy-hatch: #848880;
+  --heat-1: #E3EAFB;
+  --heat-2: #B2C1ED;
+  --heat-3: #8198E0;
+  --heat-4: #5070D2;
+  --heat-5: #1F47C4;
+  /* Behind dialogs, sheets and drawers: always a darkening layer, never built from the text colour. */
+  --scrim: rgb(9 18 14 / 0.45);
   --ink: #16201C;
   --ink-muted: #55605A;
   --ink-faint: #626C66;
@@ -52,6 +64,17 @@
   --sunken: #0B100D;
   --line: #27302B;
   --line-strong: #606964;
+  --grid-hour: #353F39;
+  --grid-half: #252D28;
+  --busy: #28312C;
+  --busy-edge: #727C76;
+  --busy-hatch: #727C76;
+  --heat-1: #2A3647;
+  --heat-2: #3F4F75;
+  --heat-3: #5369A3;
+  --heat-4: #6882D1;
+  --heat-5: #7C9BFF;
+  --scrim: rgb(0 0 0 / 0.6);
   --ink: #E8ECE7;
   --ink-muted: #A3ADA6;
   --ink-faint: #8A958E;
@@ -92,6 +115,16 @@
   --color-sunken: var(--sunken);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
+  --color-grid-hour: var(--grid-hour);
+  --color-grid-half: var(--grid-half);
+  --color-busy: var(--busy);
+  --color-busy-edge: var(--busy-edge);
+  --color-heat-1: var(--heat-1);
+  --color-heat-2: var(--heat-2);
+  --color-heat-3: var(--heat-3);
+  --color-heat-4: var(--heat-4);
+  --color-heat-5: var(--heat-5);
+  --color-scrim: var(--scrim);
   --color-ink: var(--ink);
   --color-ink-muted: var(--ink-muted);
   --color-ink-faint: var(--ink-faint);
@@ -192,19 +225,26 @@
     background-color: var(--sunken);
     background-image: repeating-linear-gradient(135deg, var(--line-strong) 0 1px, transparent 1px 6px);
   }
+  /* Someone else's booking: the same hatch in the busy block's own tones (lighter than the surface in dark). */
+  .hatch-busy {
+    background-color: var(--busy);
+    background-image: repeating-linear-gradient(135deg, var(--busy-hatch) 0 1px, transparent 1px 5px);
+  }
+  /* The one deliberate flourish (DESIGN.md §3, §7): a new booking settles into place. */
+  .animate-settle {
+    animation: settle 160ms ease-out both;
+  }
 }
 
-/*
- * Screens not yet redesigned (Phase A restyles only Login, Register and
- * Resources) keep their original dark styling inside this scope, so they
- * stay legible in either theme until their turn.
- */
-.legacy-screen {
-  color-scheme: dark;
-  background: var(--color-slate-950);
-  color: var(--color-slate-200);
-  border-radius: var(--radius-panel);
-  padding: 16px;
+@keyframes settle {
+  from {
+    opacity: 0.4;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

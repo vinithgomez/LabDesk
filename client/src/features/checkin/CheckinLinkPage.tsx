@@ -1,5 +1,7 @@
+import { QrCode } from "lucide-react";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { Button, ICON_STROKE, PageHeader } from "../../components/ui";
 import { failureOutcome, successOutcome, type Outcome } from "./messages";
 import { payloadFromParams } from "./parse-qr";
 import { ResultPanel } from "./ResultPanel";
@@ -20,7 +22,12 @@ export default function CheckinLinkPage() {
   if (!payload) {
     return (
       <ResultPanel
-        outcome={{ tone: "failure", title: "Not a valid code", detail: "This link is incomplete. Scan the QR code on the resource again." }}
+        outcome={{
+          tone: "failure",
+          title: "Not a valid code",
+          detail: "This link is incomplete.",
+          next: "Scan the QR code on the resource again.",
+        }}
         onAgain={() => window.location.assign("/scan")}
         againLabel="Open the scanner"
       />
@@ -37,20 +44,17 @@ export default function CheckinLinkPage() {
     });
 
   return (
-    <div className="flex flex-1 flex-col gap-6">
-      <h1 className="text-2xl font-bold text-white">Ready to check in</h1>
-      <p className="flex-1 text-lg text-slate-300">
-        Tap below to record your attendance. If you're already checked in, this checks you out.
-      </p>
-      <button
-        type="button"
-        onClick={submit}
-        disabled={checkin.isPending}
-        className="min-h-16 rounded-2xl bg-indigo-600 text-lg font-semibold text-white disabled:opacity-60 focus:outline-none focus-visible:ring-4 focus-visible:ring-indigo-300"
-      >
+    <div className="flex flex-1 flex-col gap-4">
+      <PageHeader className="pb-0" title="Ready to check in" />
+      <p className="text-lead text-ink">Tap below to record your attendance. If you&apos;re already checked in, this checks you out.</p>
+      <div className="flex aspect-[4/3] flex-col items-center justify-center gap-3 rounded-panel border border-line bg-sunken text-ink-muted md:aspect-[16/10]">
+        <QrCode aria-hidden="true" size={64} strokeWidth={ICON_STROKE} />
+        <p className="text-body">Code read from the resource&apos;s QR link.</p>
+      </div>
+      <Button variant="primary" onClick={submit} disabled={checkin.isPending} className="mt-auto min-h-14 text-lead">
         {checkin.isPending ? "Checking you in…" : "Check in or out"}
-      </button>
-      <Link to="/scan" className="text-center text-indigo-300 underline">
+      </Button>
+      <Link to="/scan" className="text-center text-body font-medium text-cobalt underline-offset-4 hover:underline">
         Use the in-app scanner instead
       </Link>
     </div>
