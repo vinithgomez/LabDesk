@@ -24,6 +24,60 @@ LabDesk replaces the register with:
 
 The full specification is `CLAUDE.md`.
 
+## Screenshots
+
+Screenshots of the seeded demo data (see the quick start below).
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/calendar.png" alt="The week calendar for the 3D Printer P-2 in the light theme, with the user's own bookings in blue, other people's bookings as grey Busy blocks and a hatched maintenance window.">
+      <br><sub>The week calendar: your bookings in blue, other people's as Busy, maintenance hatched.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/calendar-dark.png" alt="The same calendar in the dark theme, with a dragged selection and the booking panel open on the right.">
+      <br><sub>The same calendar in the dark theme, with a selection and the booking panel open.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/analytics.png" alt="The analytics page: four summary figures, then a heatmap of booked hours by day and hour in shades of blue, and utilization by resource.">
+      <br><sub>Analytics: a summary strip, the booked-hours heatmap and utilization by resource.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/approvals.png" alt="The approvals queue: each pending request shows when, who, what and why, with Approve and Reject buttons.">
+      <br><sub>The approvals queue, with Approve and Reject on each request.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/my-bookings.png" alt="My bookings: a list of upcoming bookings, each with its resource, time, status and a Cancel booking action.">
+      <br><sub>My bookings: upcoming bookings with their status and a quiet cancel action.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/admin-resources.png" alt="The admin Resources tab in the dark theme: a table of resources with edit, QR code and deactivate actions.">
+      <br><sub>Admin, Resources tab, in the dark theme.</sub>
+    </td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/phone-calendar.png" alt="The phone day view: a strip of the week's seven days above one day's timeline, with a maintenance window shown hatched.">
+      <br><sub>The phone day view: a week strip and one day's timeline.</sub>
+    </td>
+    <td width="50%" valign="top">
+      <img src="docs/screenshots/phone-booking.png" alt="The phone booking sheet open over a selected time, with fields for the end time, purpose and attendees and a Book button.">
+      <br><sub>Tap a start and an end, then book from the sheet.</sub>
+    </td>
+  </tr>
+</table>
+
+## Design
+
+The interface uses IBM Plex Sans (with Plex Sans Condensed for the calendar's time axis and figures), one cobalt accent, and is light by default with a dark theme you switch in the user menu. On a phone, booking uses a one-day timeline: tap a start, then an end. The colour, type and layout rules are in [DESIGN.md](DESIGN.md).
+
 ## Architecture
 
 ```mermaid
@@ -32,10 +86,10 @@ flowchart LR
     phone["Phone / laptop<br/>(PWA)"]
     cal["Calendar apps"]
   end
-  subgraph Frontend["Frontend — Vercel (or nginx in docker compose)"]
+  subgraph Frontend["Frontend — nginx in docker compose (Vercel is the documented target)"]
     pwa["React PWA<br/>book · approve · admin · scan · analytics"]
   end
-  subgraph Backend["API — Railway / Render (Docker)"]
+  subgraph Backend["API — Docker (Railway / Render are the documented targets)"]
     api["Express API<br/>routes → policy → services → repositories"]
     jobs["node-cron jobs<br/>(one run per tick via Redis lock)"]
   end
@@ -79,9 +133,12 @@ Requires Docker.
    faculty; `arjun.nair@college.edu`, student) with `SEED_USER_PASSWORD`.
 
 The API container applies migrations and seeds on start (both idempotent):
-two departments, demo staff and students, eight resources and 8 weeks of
-booking history for the analytics dashboard, with realistic purposes ("Lab
-record work", "Model training run", "Department seminar", …). Faculty, lab
+two departments, demo staff and students, eight resources, 8 weeks of
+booking history for the analytics dashboard, and the next 12 days of
+bookings (some approved, some waiting for approval), a maintenance window
+and a weekly series, so the calendar and approvals inbox have something to
+show on any day. Purposes are realistic ("Lab record work", "Model training
+run", "Department seminar", …). Faculty, lab
 in-charges and admins see `/analytics`; `/scan` is the QR scanner. The seed
 reads every password from `server/.env`; none is built into the code.
 
@@ -94,7 +151,8 @@ reads every password from `server/.env`; none is built into the code.
 5. `npm run db:seed` — two departments (CSE, ECE), the bootstrap admin from
    `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`, demo faculty / lab in-charges /
    students (password `SEED_USER_PASSWORD`) and resources in both departments,
-   plus 8 weeks of demo booking history for the analytics dashboard (re-running
+   plus 8 weeks of demo booking history for the analytics dashboard, and the
+   next 12 days of bookings, a maintenance window and a weekly series (re-running
    the seed adds nothing it already added)
 6. `npm run dev` — API on http://localhost:4000 (also runs the scheduled jobs)
 7. `cd ../client && npm install && npm run dev` — the PWA on http://localhost:5173,
@@ -316,7 +374,8 @@ under `skipped` in `GET /api/series/:id`; the rest of the series is still booked
 
 The target from `CLAUDE.md` §3: the API on **Railway or Render** (from
 `server/Dockerfile`), the PWA on **Vercel**, **managed PostgreSQL**, plus a
-**managed Redis**. Nothing here has been provisioned; these are the steps.
+**managed Redis**. This is a guide only: nothing has been provisioned or deployed,
+and there is no live URL. Hostnames and domains below are placeholders.
 
 ### 1. Decide first (only you can)
 
